@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="AhamVoice">
+  <defs>
+    <linearGradient id="aham-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4A7BB8"/>
+      <stop offset="1" stop-color="#173556"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="205" fill="url(#aham-bg)"/>
+  <g fill="#ffffff">
+    <rect x="198" y="427.4" width="84" height="169.2" rx="42"/>
+    <rect x="334" y="356.9" width="84" height="310.2" rx="42"/>
+    <rect x="470" y="277"   width="84" height="470"   rx="42"/>
+    <rect x="606" y="356.9" width="84" height="310.2" rx="42"/>
+    <rect x="742" y="427.4" width="84" height="169.2" rx="42"/>
+  </g>
+</svg>
