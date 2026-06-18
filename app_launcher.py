@@ -64,6 +64,41 @@ def _wait_until_up(port: int, timeout: float = 90.0) -> bool:
     return False
 
 
+class _DesktopApi:
+    """Exposed to the webview as ``window.pywebview.api``.
+
+    WKWebView (pywebview's macOS backend) ignores ``<a download>``, so in-app
+    download buttons would just open the file in the window. The frontend calls
+    ``save_file()`` instead: it fetches the local URL and writes it to a
+    user-chosen path via a native Save dialog.
+    """
+
+    def __init__(self, port: int) -> None:
+        self._port = port
+
+    def save_file(self, url: str, filename: str) -> bool:
+        import webview
+        import httpx
+
+        win = webview.windows[0] if webview.windows else None
+        if win is None:
+            return False
+        full = url if url.startswith("http") else f"http://127.0.0.1:{self._port}{url}"
+        result = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=filename or "download")
+        if not result:
+            return False
+        dest = result[0] if isinstance(result, (list, tuple)) else result
+        try:
+            with httpx.Client(timeout=120, trust_env=False) as client:
+                resp = client.get(full)
+                resp.raise_for_status()
+            with open(dest, "wb") as fh:
+                fh.write(resp.content)
+            return True
+        except Exception:
+            return False
+
+
 def main() -> int:
     import uvicorn
 
@@ -92,6 +127,7 @@ def main() -> int:
     webview.create_window(
         "AhamVoice",
         f"http://127.0.0.1:{port}",
+        js_api=_DesktopApi(port),
         width=1320,
         height=880,
         min_size=(1024, 720),

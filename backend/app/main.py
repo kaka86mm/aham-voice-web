@@ -1477,13 +1477,25 @@ def get_asr_model() -> Any:
                     raise RuntimeError(f"ASR/diarization model missing: {', '.join(missing)}")
                 from funasr import AutoModel
 
+                # Performance knobs. Default device stays CPU (the safe, always-works
+                # path). Set AHAMVOICE_ASR_DEVICE=mps to try the Apple GPU. Threads
+                # default to all cores; AHAMVOICE_ASR_THREADS overrides.
+                device = (os.environ.get("AHAMVOICE_ASR_DEVICE") or "cpu").strip() or "cpu"
+                try:
+                    import torch
+
+                    threads = int(os.environ.get("AHAMVOICE_ASR_THREADS") or (os.cpu_count() or 4))
+                    torch.set_num_threads(max(1, threads))
+                except Exception:
+                    pass
+
                 _asr_model = AutoModel(
                     model=str(PARAFORMER),
                     vad_model=str(VAD),
                     vad_kwargs={"max_single_segment_time": int(os.environ.get("AHAMVOICE_VAD_MAX_SEGMENT_MS", "30000"))},
                     punc_model=str(PUNC),
                     spk_model=str(CAMPLUS),
-                    device="cpu",
+                    device=device,
                     disable_update=True,
                 )
     return _asr_model

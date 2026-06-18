@@ -80,6 +80,26 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
         ? emotion?.model ?? ""
         : "";
 
+  async function handleDownload() {
+    if (!downloadHref) return;
+    const filename = `${displayName || "导出"}.md`.replace(/[\\/:*?"<>|]/g, "_");
+    const api = (window as unknown as {
+      pywebview?: { api?: { save_file?: (u: string, f: string) => Promise<boolean> } };
+    }).pywebview?.api;
+    // Desktop (pywebview/WKWebView) has no <a download>; route through the native
+    // Save dialog. In a real browser (dev) fall back to a download link.
+    if (api?.save_file) {
+      await api.save_file(downloadHref, filename);
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = downloadHref;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   return (
     <div
       className="preview-window"
@@ -111,9 +131,9 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
             </select>
           )}
           {downloadHref && (
-            <a href={downloadHref} download className="icon-btn" aria-label="下载">
+            <button type="button" onClick={handleDownload} className="icon-btn" aria-label="下载">
               <Icon name="download" size={14} />
-            </a>
+            </button>
           )}
           <button type="button" className="icon-btn" aria-label="关闭预览" onClick={onClose}>
             <Icon name="x" size={14} />

@@ -6,21 +6,9 @@
 - 会议纪要 + 情绪语义分析走**云端 DeepSeek**（在「设置」页填自己的 API Key，仅存本机，不回显明文）。
 - 无登录、无多用户、无外部集成；热词在「热词」页手动增删，或用「**导入 txt**」批量导入。
 
-## 下载安装（macOS · Apple Silicon）
+## 下载
 
-到 [**Releases**](https://github.com/li599198347-svg/AhamVoice/releases/latest) 下载。安装包约 3.9GB（内置模型 + 运行时），超过 GitHub 单文件 2GB 上限，已切成 3 个分卷。下载全部 `AhamVoice.dmg.part-*` 放到同一目录后合并：
-
-```bash
-cat AhamVoice.dmg.part-* > AhamVoice.dmg
-```
-
-双击 `AhamVoice.dmg` → 把 **AhamVoice** 拖进「应用程序」→ 首次运行解除隔离：
-
-```bash
-xattr -dr com.apple.quarantine /Applications/AhamVoice.app
-```
-
-打开后在左下「设置」填入你自己的 DeepSeek API Key 即可。仅支持 Apple Silicon（M 系列）。想自己从源码构建见 [DEPLOY.md](DEPLOY.md)。
+预编译安装包发布中。当前可按 [DEPLOY.md](DEPLOY.md) 从源码构建运行。
 
 ## 架构
 
