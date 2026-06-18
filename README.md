@@ -8,6 +8,18 @@
 - 会议纪要 + 情绪语义分析走**云端 DeepSeek**（在「设置」页填自己的 API Key，仅存本机，不回显明文）。
 - 无登录、无多用户、无外部集成；热词在「热词」页手动增删，或用「**导入 txt**」批量导入。
 
+## 关于 Aham
+
+> **把灵光一现，做成能用的。** · 本地优先的个人 AI 工具。
+
+Aham 来自 *aha moment*。这是一组本地优先的个人 AI 工具，每个只把一件事做利落——核心计算在本机跑、能离线；云端能力（如 LLM）由你自己填 API Key、仅存本机、绝不回传。
+
+| 应用 | 一句话 |
+|---|---|
+| [Aham Survey](https://github.com/li599198347-svg/aham-survey) | 现场调研工具（macOS） |
+| [Aham Voice](https://github.com/li599198347-svg/aham-voice) | 录音转写与会议纪要（macOS） |
+| [Aham PPT](https://github.com/li599198347-svg/aham-ppt) | 咨询级 AI PPT 制作技能 |
+
 ## 下载
 
 预编译安装包发布中。当前可按 [DEPLOY.md](DEPLOY.md) 从源码构建运行。
