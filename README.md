@@ -1,5 +1,7 @@
 # Aham Voice — 单机 macOS 录音转写与会议纪要
 
+![Aham Voice — 录音转写与会议纪要](assets/social-preview.png)
+
 > aham 系列 · 本地优先 · 自带 Key。（应用包与数据目录仍名 `AhamVoice`，为构建产物标识。）
 
 一个**单机 macOS 桌面应用**，开箱即用：
