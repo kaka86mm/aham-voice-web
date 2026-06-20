@@ -2,86 +2,134 @@
 
 ![Aham Voice — 录音转写与会议纪要](assets/social-preview.png)
 
-> aham 系列 · 本地优先 · 自带 Key。本仓库是 [原 macOS 桌面版](https://github.com/li599198347-svg/aham-voice) 的 Web 化分支，面向 Linux + Windows（Docker 部署）。Mac 用户请用原 repo。
+> aham 系列 · 本地优先 · 自带 Key。本仓库是 [原 macOS 桌面版](https://github.com/li599198347-svg/aham-voice) 的 Web 化分支，面向 **Linux + Windows**（Docker 部署）。Mac 用户请用原 repo（支持 MPS GPU 加速）。
 
 一个**自部署的 Web 应用**，开箱即用：
 
-- 录音 → 转写（FunASR paraformer + VAD + 标点）→ 说话人分离（CAM++）→ 声学情绪（emotion2vec），**全部本地离线**。
-- 会议纪要 + 情绪语义分析走**云端 DeepSeek**（在「设置」页填自己的 API Key，仅存本机，不回显明文）。
-- 无登录、无多用户、无外部集成；热词在「热词」页手动增删，或用「**导入 txt**」批量导入。
+- 录音 → 转写（FunASR paraformer + VAD + 标点）→ 说话人分离（CAM++）→ 声学情绪（emotion2vec），全部本地离线（容器内）。
+- 会议纪要 + 情绪语义分析走云端 DeepSeek（在「设置」页填自己的 API Key，仅存本机，不回显明文）。
+- 单用户模式：无登录多用户；可选**单密码门**（局域网共享时启用）。
+- 热词在「热词」页手动增删，或用「导入 txt」批量导入。
 
-## 关于 Aham
+## 三平台分工
 
-> **把灵光一现，做成能用的 AI 工具。**
+| 平台 | 用什么 | GPU |
+|---|---|---|
+| **Mac** | [原 repo](https://github.com/li599198347-svg/aham-voice)（pywebview 桌面版） | MPS ✅ |
+| **Linux** | 本仓库 Docker 镜像 | CUDA ✅（gpu 镜像）/ CPU |
+| **Windows** | 本仓库 Docker 镜像（同一个） | CPU only |
 
-Aham 来自 *aha moment*。每个工具只把一件事做利落。
+> 为什么 Mac 用原 repo：所有 Mac 上的 Linux 容器方案（Docker / Podman / apple/container / libkrun）都无法让 PyTorch MPS 工作——MPS 需要原生 macOS Metal 调用。Mac 要 GPU 加速就必须原生跑。
+>
+> 为什么 Windows 接受 CPU only：Windows 原生装 FunASR 全栈（torch/funasr/CUDA 版本匹配）很折腾，而 Docker 把这些麻烦全消灭。慢一点但能跑、稳定、零配置。
 
-| 应用 | 一句话 |
-|---|---|
-| [Aham UI](https://github.com/li599198347-svg/aham-ui) | 供 AI 消费的设计系统——写一次规范，AI 产出处处一致 |
-| [Aham Survey](https://github.com/li599198347-svg/aham-survey) | 现场调研工具（macOS）——聊一圈，调研结果自己长出来 |
-| [Aham Voice](https://github.com/li599198347-svg/aham-voice) | 录音转写与会议纪要（macOS）——录一段会，纪要已经写好 |
-| [Aham PPT](https://github.com/li599198347-svg/aham-ppt) | 咨询级 AI PPT 制作技能——丢一堆素材，幻灯片出来了 |
+## 快速开始
 
-## 下载
+```bash
+# 1. 克隆 + 配置
+git clone <repo> aham-voice-web && cd aham-voice-web
+cp .env.example .env
+# 编辑 .env：设 AHAMVOICE_ACCESS_PASSWORD（局域网共享建议设）、DEEPSEEK_API_KEY
 
-预编译安装包发布中。当前可按 [DEPLOY.md](DEPLOY.md) 从源码构建运行。
+# 2. 启动（首次会自动下载 ~4GB 模型，10-30 分钟）
+docker compose up -d
+
+# 3. 访问
+#    浏览器打开 http://<服务器IP>:8765
+#    同 Wi-Fi 的手机/平板也能访问
+docker compose logs -f models  # 看模型下载进度（可选）
+```
+
+**前提**：装好 [Docker](https://docs.docker.com/get-docker/)。Linux 服务器或 Windows 的 Docker Desktop 均可。
+
+## 配置（.env）
+
+```bash
+AHAMVOICE_HOST=0.0.0.0              # 绑定地址（0.0.0.0 = 局域网可访问）
+AHAMVOICE_PORT=8765                 # 端口
+AHAMVOICE_ACCESS_PASSWORD=          # 空=裸奔；非空=启用单密码门
+AHAMVOICE_HOME=/data                # 数据目录（SQLite + 录音，volume 挂载）
+AHAMVOICE_MODELS_DIR=/models        # 模型目录（volume 挂载，首次自动下载）
+DEEPSEEK_API_KEY=                   # 纪要/情绪用（也可运行时在设置页填）
+DEEPSEEK_API_BASE=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
+AHAMVOICE_ASR_DEVICE=cpu            # cpu（latest 镜像）/ cuda（gpu 镜像）
+```
+
+## GPU 加速（Linux + NVIDIA）
+
+默认 `:latest` 是 CPU 版。有 NVIDIA GPU 的 Linux 服务器可用 gpu 镜像加速转写：
+
+1. 装 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+2. 改 `docker-compose.yml`：`image: aham-voice-web:gpu`、`dockerfile: Dockerfile.gpu`，取消 `deploy.resources` 注释
+3. `.env` 设 `AHAMVOICE_ASR_DEVICE=cuda`
+4. `docker compose up -d --build`
+
+## 模型
+
+5 个模型共约 4GB，首次启动自动从 ModelScope 下载到 `./models/` volume：
+
+- `speech_fsmn_vad_zh-cn-16k-common-pytorch`（VAD）
+- `punc_ct-transformer_cn-en-common-vocab471067-large`（标点）
+- `speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch`（ASR）
+- `speech_campplus_sv_zh-cn_16k-common`（说话人分离）
+- `emotion2vec_plus_large`（声学情绪）
+
+下载进度写 stdout：`docker compose logs -f`。下载一次后持久化在 volume，重启容器不重下。
+
+## 单密码门
+
+`.env` 设 `AHAMVOICE_ACCESS_PASSWORD=你的密码` 即启用。浏览器访问先跳登录页输密码，登录后 cookie 有效（重启服务需重新登录）。未设则裸奔（仅本机/可信网络用）。
+
+> 单密码门只能挡随机路人，非高安全。HTTP 明文下密码可被同网嗅探——高安全场景请在前面加反向代理 + TLS。
 
 ## 架构
 
-> 改造进行中。当前仍是单文件后端；后续拆分见 `docs/superpowers/`。
-
 ```
-backend/app/main.py          # FastAPI 单进程（单文件），同时提供 /api 与前端 dist
-frontend-src/                # 前端源码（React + Vite + TS + Tailwind v4 + Aham 设计系统）
-frontend/dist/               # 前端构建产物（被跟踪；单进程挂载 + SPA fallback）
+backend/app/
+├── main.py          # FastAPI app + 路由 + startup + 静态托管（前端 dist）
+├── config.py        # 路径常量、env、DeepSeek 配置
+├── state.py         # 模块级共享状态（锁/模型单例/单用户身份）
+├── db.py            # SQLite 连接、schema、迁移、中断恢复、task helper
+├── security.py      # 单密码门（cookie token + middleware）
+├── deepseek.py      # DeepSeek LLM 传输层
+├── asr.py           # FunASR 转写 + 语义段合并（枢纽）
+├── hotwords.py      # 热词多维打分 + 双轨包 + ASR 可说性过滤
+├── voiceprint.py    # 声纹多采样匹配 + 说话人合并
+├── emotion.py       # emotion2vec 声学层 + DeepSeek 语义层
+├── summary.py       # 会议纪要分块 map-reduce + 模板 + 改写
+├── model_download.py # 首次启动模型检测/下载
+└── routes/auth.py   # 单密码登录路由
+frontend-src/        # 前端源码（React + Vite + TS + Tailwind v4 + Aham 设计系统）
+frontend/dist/       # 前端构建产物（被跟踪；后端单进程托管 + SPA fallback）
+Dockerfile.cpu       # CPU 镜像（linux/amd64 + arm64）
+Dockerfile.gpu       # GPU 镜像（linux/amd64 + CUDA）
+docker-compose.yml   # volume 挂载 models/data + restart 策略
 ```
 
-数据目录默认 `~/Library/Application Support/AhamVoice`（可用 `RECORDING_AI_HOME` 覆盖）；
-DeepSeek 配置存 `数据目录/config.json`。模型/ffmpeg 在打包时内置进 `.app`。
+数据目录（容器内 `/data`，volume 挂载）：SQLite 数据库、录音文件、导出。
 
-> **在另一台 Mac 从源码部署**（装模型/依赖/ffmpeg、跑起来、打包）见 [DEPLOY.md](DEPLOY.md)。
-
-## 本机开发（单进程）
+## 本地开发
 
 ```bash
-cd frontend-src && npm install && npm run build    # 产出 ../frontend/dist
-cd .. && <venv-python> -m uvicorn backend.app.main:app --port 8765
-# 浏览器打开 http://127.0.0.1:8765    （端口别用 5173/5174）
+# 后端（venv，改 Python 即生效）
+python -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements.txt   # 轻量依赖（fastapi/uvicorn/dotenv）
+# 完整 ASR 测试需：pip install -r backend/requirements-asr.txt（torch/funasr，重型）
+AHAMVOICE_HOME=/tmp/aham-dev python -m uvicorn backend.app.main:app --port 8765 --reload
+
+# 前端（改 TS 热更新）
+cd frontend-src && npm install && npm run dev   # Vite 跑 5173，已配 /api 代理到 8765
 ```
 
-改了 `frontend-src` 必须重新 `npm run build`（`frontend/dist` 是被跟踪的）。
-后端语法自检：`<venv-python> -m py_compile backend/app/main.py`。
-
-## 打包（出 .app + DMG）
-
-```bash
-bash packaging/macos/build_app.sh        # 约十几分钟，输出 ~/AhamVoice-build/
-```
-
-内置 CPython(arm64) + 全部依赖 + 5 个模型 + 静态化 ffmpeg，ad-hoc 签名。**仅 Apple Silicon**。
-装到别的 Mac 后首次运行需解除隔离：
-
-```bash
-xattr -dr com.apple.quarantine /Applications/AhamVoice.app
-```
-
-（或右键 → 打开 → 再点「打开」。）
-
-## 热词 txt 导入格式
-
-`#` 开头与空行忽略；其余每行是一个热词，两种写法：
-
-- 纯词：`帕萨思`
-- 扩展（英文逗号分隔，最多 4 段）：`词,别名(多个用分号;隔),类型,权重`
-  例：`金蝶接口,金蝶API;金蝶系统,产品,9`
-
-`词` 必填，其余可选（默认 类型=术语、权重=8）。已存在的词（不区分大小写）与文件内重复项自动跳过。
+测试：`pip install pytest httpx && python -m pytest backend/tests/`
 
 ## 主要 API
 
 | 路由 | 用途 |
 |---|---|
+| `POST /api/auth/login` | 单密码登录（密码门启用时） |
+| `GET /api/health` | 健康检查（密码门白名单） |
 | `GET /api/me` | 当前（固定本机）用户 |
 | `GET/PATCH /api/settings` | DeepSeek API Key / 模型 |
 | `GET/POST /api/recordings` | 录音列表 / 上传 |
@@ -93,4 +141,18 @@ xattr -dr com.apple.quarantine /Applications/AhamVoice.app
 | `POST /api/hotwords/import` | 从 txt 批量导入热词 |
 | `GET/POST/PATCH /api/voiceprints` | 声纹管理 |
 
-完整路由见 `backend/app/main.py` 里的 `@app.` 装饰器。
+## 热词 txt 导入格式
+
+`#` 开头与空行忽略；其余每行是一个热词，两种写法：
+
+- 纯词：`帕萨思`
+- 扩展（英文逗号分隔，最多 4 段）：`词,别名(多个用分号;隔),类型,权重`
+  例：`金蝶接口,金蝶API;金蝶系统,产品,9`
+
+`词` 必填，其余可选（默认 类型=术语、权重=8）。已存在的词（不区分大小写）与文件内重复项自动跳过。
+
+## 关于 Aham
+
+> **把灵光一现，做成能用的 AI 工具。**
+
+Aham 来自 *aha moment*。每个工具只把一件事做利落。详见 [原项目](https://github.com/li599198347-svg/aham-voice#关于-aham)。
