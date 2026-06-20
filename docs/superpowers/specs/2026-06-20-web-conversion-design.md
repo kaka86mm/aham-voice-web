@@ -6,23 +6,30 @@
 
 ## 一、改造目标
 
-把一个 macOS 单机桌面录音转写应用（pywebview 原生窗口 + 单进程单用户 + 绑定 127.0.0.1）改造成**跨平台（mac + linux）Web 应用**：去桌面外壳，浏览器访问，Docker 部署，局域网可共享，保留"自带 Key、本地优先、隐私不上云"的核心定位。
+把一个 macOS 单机桌面录音转写应用（pywebview 原生窗口 + 单进程单用户 + 绑定 127.0.0.1）改造成**跨平台（mac + linux）Web 应用**：去桌面外壳，浏览器访问，局域网可共享，保留"自带 Key、本地优先、隐私不上云"的核心定位。
+
+**部署双轨**（关键决策）：Mac 与 Linux 各走最优解。
+- **Mac**：原生 venv + launchd 后台服务。**保留 MPS GPU 加速**（容器方案做不到）。
+- **Linux**：Docker 部署。无 GPU 用 cpu 镜像，有 NVIDIA 用 gpu 镜像。
+
+> 为什么 Mac 不走 Docker：所有 Mac 上的 Linux 容器方案（Docker / Podman / apple/container / libkrun）都**无法让 PyTorch MPS 工作**——MPS 需要原生 macOS Metal 调用，Linux guest 访问不到 Apple Silicon GPU。这是平台限制，不是 Docker 一家的问题（依据：[apple/container Discussion #62](https://github.com/apple/container/discussions/62)、[PyTorch discuss](https://discuss.pytorch.org/t/does-pytorch-support-linux-with-apple-silicon/197626)）。所以 Mac 要 GPU 加速就必须原生跑。
 
 ### 改造前后对比
 
 | 维度 | 改造前（桌面版） | 改造后（Web 版） |
 |---|---|---|
 | 形态 | pywebview 原生窗口 | 浏览器访问 |
-| 部署 | `.app` bundle + `.dmg` | Docker 镜像（CPU + GPU 双变体） |
-| 启动 | 双击 .app | `docker compose up -d` |
-| 服务管理 | 关窗即退出 | `restart: unless-stopped` 崩溃自拉起 |
-| 平台 | 仅 macOS Apple Silicon | mac（Docker Desktop）+ linux |
+| 部署 | `.app` bundle + `.dmg` | Mac 原生（venv+launchd）/ Linux Docker |
+| 启动 | 双击 .app | Mac: launchctl 自启 / Linux: `docker compose up -d` |
+| 服务管理 | 关窗即退出 | Mac: launchd KeepAlive / Linux: restart 策略，崩溃自拉起 |
+| 平台 | 仅 macOS Apple Silicon | mac（原生）+ linux（Docker） |
+| GPU 加速 | MPS 可用 | Mac: MPS 保留 / Linux: NVIDIA CUDA（gpu 镜像） |
 | 绑定 | 127.0.0.1，仅本机 | 0.0.0.0，局域网可达（手机/平板） |
 | 访问控制 | 无（裸奔） | 单密码门（cookie token） |
-| 模型分发 | 打进 .app bundle（~4GB） | volume 挂载，首次自动下载 |
+| 模型分发 | 打进 .app bundle（~4GB） | 首次自动下载（Mac 本地目录 / Linux volume） |
 | 配置 | 运行时 env | `.env` 文件 |
 | 后端代码 | 单文件 4139 行 | 12 个模块（中等粒度） |
-| ffmpeg | dylib 重定位 + ad-hoc 签名（~200 行 macOS 专属代码） | `apt install ffmpeg`（一行） |
+| ffmpeg | dylib 重定位 + ad-hoc 签名（~200 行 macOS 专属代码） | Mac: 保留重定位 / Linux: `apt install ffmpeg` |
 
 ### 不变的部分（核心业务逻辑）
 
@@ -43,20 +50,27 @@
 
 ## 二、架构
 
-### 进程模型
+### 进程模型（双轨）
 
 ```
-开发者：构建两套镜像
-  Dockerfile.cpu   → ahamvoice:latest      (linux/amd64 + linux/arm64)
-  Dockerfile.gpu   → ahamvoice:gpu          (linux/amd64，带 CUDA)
+【Mac 路线】原生 venv + launchd
+  python -m venv && pip install -r requirements-asr.txt
+  cp .env.example .env  →  填密码/端口（AHAMVOICE_ASR_DEVICE=mps 开 GPU）
+  安装 launchd plist → launchctl load（登录自启 + KeepAlive）
+  浏览器/手机访问 http://<mac-ip>:8765
 
-用户：docker compose up -d
-  - .env 配置（密码、端口、模型路径、绑定地址）
-  - docker-compose.yml 选 latest 或 gpu 镜像
-  - volumes: models(首次自动下载) + data(SQLite+录音)
-  - restart: unless-stopped（崩了自动拉起）
-  - 浏览器/手机访问 http://<host>:8765
+【Linux 路线】Docker
+  构建镜像：
+    Dockerfile.cpu   → ahamvoice:latest   (linux/amd64 + linux/arm64)
+    Dockerfile.gpu   → ahamvoice:gpu       (linux/amd64，带 CUDA，--gpus all)
+  docker compose up -d
+    - .env 配置 / docker-compose.yml 选 latest 或 gpu 镜像
+    - volumes: models(首次自动下载) + data(SQLite+录音)
+    - restart: unless-stopped（崩了自动拉起）
+    - 浏览器/手机访问 http://<host>:8765
 ```
+
+两条路线共用：同一份后端代码、同一份前端、同一份 `.env` 配置、同一套单密码门。差异只在"怎么跑起来"。
 
 ### 后端模块结构（中等粒度，~12 文件）
 
@@ -108,9 +122,10 @@ security.py     ← config, state
 ### 删除项
 
 - `app_launcher.py` 整个文件（pywebview、随机端口、`_DesktopApi.save_file`）
-- `packaging/macos/build_app.sh`（替换为 Dockerfile）
-- `packaging/macos/` 目录其余内容（icon、make_icon.py、README-install.txt）
-- 多用户死代码（见下节）
+- `packaging/macos/` 里的 `.app`/`.dmg` 相关产物（Info.plist 模板、icon、make_icon.py、README-install.txt）—— 这些是 pywebview 桌面壳的配套，Web 版不需要
+- `packaging/macos/build_app.sh` 中的 **`.app` bundle 组装段**（Info.plist 生成、MacOS 可执行脚本、ad-hoc 签名整个 .app、hdiutil 打 DMG）—— 删除
+- `packaging/macos/build_app.sh` 中的 **精华段保留**：python-build-standalone 拉取、依赖安装、模型复制、**ffmpeg dylib 重定位 + ad-hoc 签名**——这些被 Mac 原生路线的自包含 ffmpeg 选项复用（见第四节 Mac ffmpeg）
+- 多用户死代码（见第七节）
 
 ## 三、安全：单密码门（security.py）
 
@@ -152,15 +167,17 @@ security.py     ← config, state
 - `router.tsx` 加 `/login` 路由
 - `api/client.ts`：fetch 加 `credentials: 'include'`；收到 401 → 跳 `/login`
 
-## 四、部署：Docker 跨平台
+## 四、部署：双轨（Mac 原生 + Linux Docker）
 
-### 镜像变体
+### Linux 路线：Docker
+
+#### 镜像变体（仅 Linux）
 
 ```
 Dockerfile.cpu   → ahamvoice:latest
   基镜像：python:3.12-slim（debian）
   torch CPU 版
-  适用：Mac（任何架构，Docker Desktop）、Linux 无 GPU
+  适用：Linux 无 GPU（或 Mac 用户不在乎 GPU 想偷懒走 Docker）
   多架构：linux/amd64 + linux/arm64（docker buildx）
 
 Dockerfile.gpu   → ahamvoice:gpu
@@ -172,7 +189,9 @@ Dockerfile.gpu   → ahamvoice:gpu
 
 两套镜像是物理必然：torch 的 CPU 版和 CUDA 版是不同 wheel 包，二进制不兼容，无法塞进一个镜像按需切换。
 
-### Volume 挂载
+> Mac 用户注意：即使走 Docker，容器内也只能 CPU 推理（无 MPS）。要 GPU 加速请走下面的 Mac 原生路线。
+
+#### Volume 挂载
 
 ```yaml
 # docker-compose.yml
@@ -184,7 +203,8 @@ services:
       - ./models:/models            # 4GB 模型，首次自动下载
       - ./data:/data                # SQLite + 录音文件（用户数据）
     env_file: .env
-    restart: unless-stopped         # ← 代替 KeepAlive，崩了自动拉起
+    restart: unless-stopped         # ← 崩了自动拉起
+    # gpu 镜像额外加：deploy.resources.devices / --gpus all
 ```
 
 挂载点：
@@ -195,15 +215,11 @@ services:
 - volume `./models:/models` ↔ `AHAMVOICE_MODELS_DIR=/models`
 - volume `./data:/data` ↔ `AHAMVOICE_HOME=/data`
 
-### ffmpeg 处理
+#### Linux ffmpeg
 
-Dockerfile 里 `apt-get install -y ffmpeg`。原版那段 200 行的 dylib 重定位 + ad-hoc 签名代码**整段删除**——这是 Docker 化最大的净收益。
+Dockerfile 里 `apt-get install -y ffmpeg`，依赖由基镜像解决，无需重定位。
 
-### 首次启动模型自动下载
-
-容器启动时（`startup` 事件）检测 `/models` 下 5 个模型目录是否存在，缺哪个下哪个。用 modelscope 或 funasr 自带下载。下载进度写 stdout，用户 `docker logs -f` 可见。
-
-### 日常管理
+#### Linux 日常管理
 
 ```bash
 docker compose up -d        # 启动
@@ -211,6 +227,56 @@ docker compose logs -f      # 看日志
 docker compose restart      # 重启
 docker compose down         # 停止
 ```
+
+### Mac 路线：原生 venv + launchd
+
+#### 安装
+
+```bash
+git clone <repo> && cd aham-voice
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements-asr.txt
+cp .env.example .env          # 填密码/端口，设 AHAMVOICE_ASR_DEVICE=mps 开 GPU
+cd frontend-src && npm install && npm run build   # 产出 ../frontend/dist
+```
+
+模型首次启动自动下载到 `~/Library/Application Support/AhamVoice/models/`（沿用原版数据目录）。
+
+#### launchd plist（用户级 LaunchAgent）
+
+```xml
+~/Library/LaunchAgents/com.ahamvoice.server.plist
+  Label              com.ahamvoice.server
+  ProgramArguments   <repo>/.venv/bin/python -m uvicorn backend.app.main:app
+                     --host ${AHAMVOICE_HOST} --port ${AHAMVOICE_PORT}
+  WorkingDirectory   <repo>
+  RunAtLoad          true        ← 登录后自启
+  KeepAlive          true        ← 崩了自动拉起
+  StandardOutPath    <repo>/logs/uvicorn.log
+  StandardErrorPath  <repo>/logs/uvicorn.log
+  EnvironmentVariables  从 .env 注入
+```
+
+放 `~/Library/LaunchAgents/`（用户级，登录后启动），不放 `/Library/LaunchDaemons/`（系统级需 root）。单机自用场景用户级足够。
+
+#### Mac ffmpeg
+
+Mac 上 ffmpeg 仍需处理 dylib 依赖。两个选项：
+- **简单**：`brew install ffmpeg`，依赖由 Homebrew 管理（要求用户装了 Homebrew）
+- **自包含**：保留原 `build_app.sh` 里的 dylib 重定位逻辑（otool/install_name_tool/codesign），把 ffmpeg 静态化进项目目录，不依赖 Homebrew
+
+默认推荐 Homebrew（简单）；自包含路径作为可选，由 install-mac.sh 封装，给"想分发给没装 Homebrew 的 Mac"的场景。
+
+#### Mac 日常管理
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.ahamvoice.server.plist    # 启动/开机自启
+launchctl unload ~/Library/LaunchAgents/com.ahamvoice.server.plist  # 停止
+launchctl kickstart -k gui/$(id -u)/com.ahamvoice.server            # 重启
+tail -f <repo>/logs/uvicorn.log                                     # 看日志
+```
+
+（可封装成一个 `scripts/aham-voice-mac.sh` 包装上述命令，可选。）
 
 ## 五、配置：.env 文件
 
@@ -230,12 +296,15 @@ DEEPSEEK_API_BASE=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
 
 # ASR 性能（保留原版所有 env 开关）
-AHAMVOICE_ASR_DEVICE=cpu               # cpu（默认，全平台）或 cuda（仅 GPU 镜像）
+AHAMVOICE_ASR_DEVICE=cpu               # cpu（全平台默认）/ mps（Mac 原生，调 Apple GPU）/ cuda（Linux gpu 镜像）
 AHAMVOICE_ASR_THREADS=
 AHAMVOICE_BATCH_SIZE_S=300
 # ... 其余 AHAMVOICE_* 开关原样保留
 #
-# 注意：Docker 内是 Linux 容器，没有 mps。mps 仅 macOS 原生跑（开发模式）可用。
+# 各部署路线可用的 device：
+#   Mac 原生    → cpu 或 mps（mps 显著加速，推荐 Mac 用户开）
+#   Linux cpu   → cpu
+#   Linux gpu   → cuda
 ```
 
 ## 六、前端改造点
@@ -261,7 +330,7 @@ AHAMVOICE_BATCH_SIZE_S=300
 - `can_access_recording` 中的角色判断（简化为只校验存在性）
 - `_guard_admin_change`、`normalize_user` 的多用户字段
 - `hash_password` / `verify_password` / `session_expiry` / `create_session`（密码门有自己的简单 token）
-- 旧 `/api/auth/login` / `/api/auth/logout` / `/api/auth/change-password`（被新密码门替代）
+- 旧的 `/api/auth/login`（查 users 表 + 校验密码哈希）/ `/api/auth/logout` / `/api/auth/change-password`（被新单密码门替代；路由路径 `POST /api/auth/login` 由新 `routes/auth.py` 复用，但实现完全不同：只比对单个 access password）
 
 **保留：**
 - `LOCAL_USER_ID = "local-admin"` 单用户标识
@@ -301,20 +370,19 @@ AHAMVOICE_BATCH_SIZE_S=300
   - 前端加登录页 + credentials
   - 验证：未登录 401、登录后正常
 
-第 7 步：Docker 化
-  - Dockerfile.cpu + Dockerfile.gpu + docker-compose.yml + .env.example
-  - 模型自动下载逻辑
-  - 验证：docker build + compose up + 浏览器访问
+第 7 步：双轨部署
+  - Linux 路线：Dockerfile.cpu + Dockerfile.gpu + docker-compose.yml + 模型自动下载
+  - Mac 路线：launchd plist 模板 + install-mac.sh + ffmpeg 处理
+  - 验证：Linux docker build + compose up；Mac launchctl load + 浏览器访问
 
-第 8 步：删 app_launcher.py + build_app.sh，更新 README
+第 8 步：删 app_launcher.py，更新 README（含双轨部署说明）
 ```
 
 ## 九、开发模式
 
-宿主机开发 + Docker 部署（开发/部署分离）：
+开发统一在宿主机直跑（Mac/Linux 通用），改后端即生效：
 
 ```bash
-# 开发（宿主机直跑，改后端即生效）
 # 方式 A（推荐，贴近部署形态）：构建前端 + 后端直跑
 cd frontend-src && npm install && npm run build    # 产出 ../frontend/dist
 cd .. && python -m uvicorn backend.app.main:app --port 8765 --reload
@@ -325,18 +393,16 @@ cd frontend-src && npm install && npm run dev      # Vite 跑 5173
 # 另一个终端
 python -m uvicorn backend.app.main:app --port 8765 --reload
 # 浏览器开 http://localhost:5173（Vite vite.config.ts 已配 /api 代理到 8765）
-
-# 部署（Docker）
-docker compose up -d
 ```
 
-`.env` 在两种模式下都生效，是统一配置层。
+部署时：Mac 走 launchd（见第四节），Linux 走 Docker（见第四节）。`.env` 在开发/部署下都生效，是统一配置层。
 
 ## 十、风险与边界
 
-1. **Mac 上 Docker Desktop 开销**：Docker Desktop 在 Mac 上跑 Linux VM，吃 2-4GB 内存 baseline，加上容器内 torch 跑 ASR，总开销比原版（原生跑 torch）大。这是跨平台统一的代价，已与用户确认接受。
-2. **拆分循环依赖**：`transcribe_recording` 同时调 hotwords/voiceprint/state。靠 state.py 提供共享 + asr.py 单向 import 解决。实施计划会明确每步的 import 方向。
-3. **模型首次下载耗时**：4GB 模型首次下载可能 10-30 分钟（取决于网速）。日志要有进度提示，避免用户以为卡死。
-4. **GPU 版仅 Linux**：Mac Docker Desktop 不支持 GPU 透传，Mac 上必然 CPU 推理（与原版一致）。文档需明确。
-5. **密码门非高安全**：单密码门只能挡随机路人，挡不住针对性攻击。HTTP 明文（无 TLS）下密码可被同网嗅探。文档需提示"高安全场景请加反向代理 + TLS"。
-6. **数据迁移**：原版数据在 `~/Library/Application Support/AhamVoice/`，Web 版在 volume 挂载点。已有用户从桌面版升级时，需提供数据迁移说明（手动 cp）。
+1. **双轨部署的维护成本**：Mac 原生 + Linux Docker 两套部署文档/脚本要分别维护。这是保留 Mac MPS GPU 加速的必要代价。缓解：共用同一份后端代码/前端/`.env`，差异只在"怎么跑起来"，文档分章节清晰即可。
+2. **Mac MPS 稳定性**：PyTorch MPS 后端在某些算子上的稳定性/精度不如 CPU，FunASR 在 MPS 上可能偶发报错或结果异常。缓解：保留原版 `AHAMVOICE_ASR_DEVICE=cpu` 作为安全默认；MPS 作为可选项，文档提示"遇到转写异常可切回 cpu"。
+3. **拆分循环依赖**：`transcribe_recording` 同时调 hotwords/voiceprint/state。靠 state.py 提供共享 + asr.py 单向 import 解决。实施计划会明确每步的 import 方向。
+4. **模型首次下载耗时**：4GB 模型首次下载可能 10-30 分钟（取决于网速）。日志要有进度提示，避免用户以为卡死。
+5. **Mac Docker 路线的 GPU 缺失**：若 Mac 用户误选 Docker 路线，将失去 MPS 加速（只能 CPU）。缓解：文档明确标注"Mac 用户推荐原生路线以获得 GPU 加速"，Docker 路线仅作为 Mac 上的备选。
+6. **密码门非高安全**：单密码门只能挡随机路人，挡不住针对性攻击。HTTP 明文（无 TLS）下密码可被同网嗅探。文档需提示"高安全场景请加反向代理 + TLS"。
+7. **数据迁移**：原版（桌面）数据在 `~/Library/Application Support/AhamVoice/`。升级时：Mac 原生路线沿用同目录无需迁移；Linux Docker 路线需手动 cp 到 volume 挂载点。文档需分别说明。
