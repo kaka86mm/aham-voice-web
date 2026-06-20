@@ -166,6 +166,14 @@ def current_user(
 @app.on_event("startup")
 def startup() -> None:
     ensure_schema()
+    # 容器场景：模型 volume 挂载，首次启动检测缺失并下载（Docker 内 modelscope 可用时）。
+    # 本地开发无 modelscope 时 ensure_models 内部跳过（只警告），不阻塞启动。
+    from .model_download import ensure_models
+    from .config import MODELS
+    try:
+        ensure_models(MODELS)
+    except Exception as exc:
+        print(f"[startup] 模型检测/下载失败（不阻塞，转写时再报）: {exc}", flush=True)
     recover_interrupted_tasks()
     recover_queued_recordings()
     _start_cleanup_loop()
