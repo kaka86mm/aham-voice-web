@@ -151,15 +151,8 @@ def normalize_profile(row: dict[str, Any]) -> dict[str, Any]:
 # login state (the access-password gate lives in security.py / Task 6). The
 # Header/Query params on current_user are kept so existing route signatures
 # (Depends(current_user)) and media URLs carrying ?token= keep working.
-LOCAL_USER_ID = "local-admin"
-
-_LOCAL_USER = {
-    "id": LOCAL_USER_ID,
-    "name": "本机用户",
-    "role": "manager",
-    "managed_team_ids": ["*"],
-    "team_id": None,
-}
+# _LOCAL_USER / LOCAL_USER_ID 定义在 state.py（共享单用户身份，db.py 也用）。
+from .state import LOCAL_USER_ID, _LOCAL_USER
 
 
 def current_user(

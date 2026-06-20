@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import DB_PATH, TMP, EXPORTS
+from .state import _LOCAL_USER  # recording_payload 用 owner_name
 
 
 @contextmanager

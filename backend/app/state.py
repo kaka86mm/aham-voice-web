@@ -26,3 +26,15 @@ speaker_verifier: Any | None = None
 emotion_model: Any | None = None
 
 DEFAULT_VOICEPRINT_THRESHOLD = 0.66
+
+# 单用户身份（共享常量）。current_user 返回 _LOCAL_USER，recording_payload/
+# recover_queued_recordings 等多处引用，放这里供 db.py / main.py 共用。
+LOCAL_USER_ID = "local-admin"
+
+_LOCAL_USER = {
+    "id": LOCAL_USER_ID,
+    "name": "本机用户",
+    "role": "manager",
+    "managed_team_ids": ["*"],
+    "team_id": None,
+}
