@@ -1,10 +1,10 @@
-# Aham Voice — 单机 macOS 录音转写与会议纪要
+# Aham Voice Web — 录音转写与会议纪要（Linux / Windows，Docker）
 
 ![Aham Voice — 录音转写与会议纪要](assets/social-preview.png)
 
-> aham 系列 · 本地优先 · 自带 Key。（应用包与数据目录仍名 `AhamVoice`，为构建产物标识。）
+> aham 系列 · 本地优先 · 自带 Key。本仓库是 [原 macOS 桌面版](https://github.com/li599198347-svg/aham-voice) 的 Web 化分支，面向 Linux + Windows（Docker 部署）。Mac 用户请用原 repo。
 
-一个**单机 macOS 桌面应用**，开箱即用：
+一个**自部署的 Web 应用**，开箱即用：
 
 - 录音 → 转写（FunASR paraformer + VAD + 标点）→ 说话人分离（CAM++）→ 声学情绪（emotion2vec），**全部本地离线**。
 - 会议纪要 + 情绪语义分析走**云端 DeepSeek**（在「设置」页填自己的 API Key，仅存本机，不回显明文）。
@@ -29,12 +29,12 @@ Aham 来自 *aha moment*。每个工具只把一件事做利落。
 
 ## 架构
 
+> 改造进行中。当前仍是单文件后端；后续拆分见 `docs/superpowers/`。
+
 ```
-app_launcher.py              # 桌面入口：起 uvicorn + pywebview 原生窗口
 backend/app/main.py          # FastAPI 单进程（单文件），同时提供 /api 与前端 dist
 frontend-src/                # 前端源码（React + Vite + TS + Tailwind v4 + Aham 设计系统）
 frontend/dist/               # 前端构建产物（被跟踪；单进程挂载 + SPA fallback）
-packaging/macos/build_app.sh # 打包成自包含 .app + DMG
 ```
 
 数据目录默认 `~/Library/Application Support/AhamVoice`（可用 `RECORDING_AI_HOME` 覆盖）；
