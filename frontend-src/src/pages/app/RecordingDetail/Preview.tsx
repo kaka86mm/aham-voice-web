@@ -83,15 +83,8 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
   async function handleDownload() {
     if (!downloadHref) return;
     const filename = `${displayName || "导出"}.md`.replace(/[\\/:*?"<>|]/g, "_");
-    const api = (window as unknown as {
-      pywebview?: { api?: { save_file?: (u: string, f: string) => Promise<boolean> } };
-    }).pywebview?.api;
-    // Desktop (pywebview/WKWebView) has no <a download>; route through the native
-    // Save dialog. In a real browser (dev) fall back to a download link.
-    if (api?.save_file) {
-      await api.save_file(downloadHref, filename);
-      return;
-    }
+    // Web browser: native <a download>. (The old pywebview save_file path was
+    // removed — this is a browser app now, WKWebView's download quirk is gone.)
     const a = document.createElement("a");
     a.href = downloadHref;
     a.download = filename;

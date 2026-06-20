@@ -20,13 +20,14 @@ function deriveBaseURL(): string {
   return "/api";
 }
 
-// Axios instance shared by every API call. Auth token lives in localStorage
-// because the backend exchanges it via a session row in sqlite that survives
-// reloads. We never need to do CSRF-token dance — the API only accepts the
-// Bearer header and CORS is locked to private-net origins.
+// Axios instance shared by every API call. The access gate (when
+// AHAMVOICE_ACCESS_PASSWORD is set) uses an httpOnly cookie set by
+// POST /api/auth/login, so withCredentials must be true for the browser to
+// send/receive that cookie cross-origin (CORS is locked to private-net origins).
 export const api = axios.create({
   baseURL: deriveBaseURL(),
   timeout: 180_000,
+  withCredentials: true,
 });
 
 const TOKEN_KEY = "ahamvoice.token";
@@ -71,6 +72,10 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       setStoredToken(null);
       for (const fn of unauthorizedListeners) fn();
+      // Access gate active and not already on /login → redirect there.
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   },
