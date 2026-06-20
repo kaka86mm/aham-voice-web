@@ -45,7 +45,9 @@ def _default_base() -> Path:
     return Path.home() / ".cache" / "recording-ai"
 
 
-BASE = Path(os.environ.get("RECORDING_AI_HOME") or _default_base())
+# 数据根目录。优先 AHAMVOICE_HOME（新名，Docker/compose 用），回退 RECORDING_AI_HOME
+# （原项目历史名，保留兼容），再回退平台默认。
+BASE = Path(os.environ.get("AHAMVOICE_HOME") or os.environ.get("RECORDING_AI_HOME") or _default_base())
 APP_DATA = BASE / "app-data"
 DB_PATH = APP_DATA / "ahamvoice.sqlite3"
 RECORDINGS = APP_DATA / "recordings"
