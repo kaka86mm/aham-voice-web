@@ -8,13 +8,15 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 
-from .config import env_int, EXPORTS
+from .config import env_int, EXPORTS, get_deepseek_config
 from .db import (
     db, now, rowdict, safe_json, slug, seconds_label,
     create_task, update_task, can_access_recording, audit,

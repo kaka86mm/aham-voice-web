@@ -18,7 +18,7 @@ from . import state
 from .config import (
     CAMPLUS, VOICEPRINTS, TMP, FFMPEG, env_float, env_int,
 )
-from .db import seconds_label
+from .db import db, seconds_label
 from .state import (
     DEFAULT_VOICEPRINT_THRESHOLD,
     asr_lock as _asr_lock,

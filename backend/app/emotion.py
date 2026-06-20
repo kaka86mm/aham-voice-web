@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -19,6 +21,7 @@ from .db import (
     create_task, update_task, can_access_recording, audit,
 )
 from .deepseek import call_deepseek_emotion
+from .voiceprint import extract_interval
 from .state import (
     asr_lock as _asr_lock,
     emotion_init_lock as _emotion_init_lock,
