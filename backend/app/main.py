@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import csv
 import asyncio
-import hashlib
-import hmac
 import json
 import os
 import re
-import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -219,33 +216,6 @@ def parse_local_time(value: str | None) -> datetime | None:
         return None
 
 
-def initial_password() -> str:
-    return os.environ.get("AHAMVOICE_INITIAL_PASSWORD", "changeme")
-
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    rounds = 210_000
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), rounds).hex()
-    return f"pbkdf2_sha256${rounds}${salt}${digest}"
-
-
-def verify_password(password: str, encoded: str | None) -> bool:
-    if not encoded:
-        return False
-    try:
-        algorithm, rounds, salt, digest = encoded.split("$", 3)
-        if algorithm != "pbkdf2_sha256":
-            return False
-        candidate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(rounds)).hex()
-        return hmac.compare_digest(candidate, digest)
-    except (ValueError, TypeError):
-        return False
-
-
-def session_expiry() -> str:
-    return (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-
 
 def probe_duration(path: Path) -> float:
     if not FFPROBE.exists():
@@ -275,56 +245,9 @@ def ensure_schema() -> None:
     with db() as conn:
         conn.executescript(
             """
-            create table if not exists teams (
-                id text primary key,
-                name text not null,
-                dept text not null,
-                wecom_department_id text,
-                parent_wecom_department_id text,
-                manager_ids text not null default '[]'
-            );
-            create table if not exists users (
-                id text primary key,
-                username text,
-                name text not null,
-                email text not null,
-                mobile text,
-                dept text not null,
-                role text not null,
-                team_id text,
-                managed_team_ids text not null default '[]',
-                status text not null default 'active',
-                source text not null default 'local',
-                wecom_userid text,
-                password_hash text,
-                must_change_password integer not null default 1,
-                failed_login_count integer not null default 0,
-                locked_until text,
-                last_active_at text not null,
-                last_login_at text,
-                created_at text,
-                updated_at text
-            );
-            create table if not exists sessions (
-                token text primary key,
-                user_id text not null,
-                created_at text not null,
-                expires_at text not null
-            );
             create table if not exists app_settings (
                 key text primary key,
                 value text not null,
-                updated_at text not null
-            );
-            create table if not exists role_mappings (
-                id text primary key,
-                match_type text not null,
-                match_value text not null,
-                role text not null,
-                managed_team_ids text not null default '[]',
-                active integer not null default 1,
-                priority integer not null default 100,
-                created_at text not null,
                 updated_at text not null
             );
             create table if not exists recordings (
@@ -489,38 +412,8 @@ def ensure_schema() -> None:
                 created_by text,
                 created_at text not null
             );
-            create table if not exists audit (
-                id text primary key,
-                created_at text not null,
-                actor_id text,
-                actor_name text not null,
-                category text not null,
-                message text not null
-            );
             """
         )
-        team_cols = {row["name"] for row in conn.execute("pragma table_info(teams)").fetchall()}
-        if "wecom_department_id" not in team_cols:
-            conn.execute("alter table teams add column wecom_department_id text")
-        if "parent_wecom_department_id" not in team_cols:
-            conn.execute("alter table teams add column parent_wecom_department_id text")
-        user_cols = {row["name"] for row in conn.execute("pragma table_info(users)").fetchall()}
-        user_migrations = {
-            "username": "text",
-            "mobile": "text",
-            "source": "text not null default 'local'",
-            "wecom_userid": "text",
-            "password_hash": "text",
-            "must_change_password": "integer not null default 1",
-            "failed_login_count": "integer not null default 0",
-            "locked_until": "text",
-            "last_login_at": "text",
-            "created_at": "text",
-            "updated_at": "text",
-        }
-        for column, definition in user_migrations.items():
-            if column not in user_cols:
-                conn.execute(f"alter table users add column {column} {definition}")
         recording_cols = {row["name"] for row in conn.execute("pragma table_info(recordings)").fetchall()}
         recording_migrations = {
             "crm_sync_status": "text not null default 'pending'",
@@ -662,92 +555,6 @@ def ensure_schema() -> None:
         if "scope" not in profile_cols:
             conn.execute("alter table speaker_profiles add column scope text not null default 'team'")
             conn.execute("update speaker_profiles set scope = case when team_id is null then 'global' else 'team' end")
-        if not conn.execute("select 1 from teams limit 1").fetchone():
-            conn.executemany(
-                "insert into teams(id,name,dept,manager_ids) values(?,?,?,?)",
-                [
-                    ("t-sales-1", "销售一组", "销售部", json.dumps(["u-lin"], ensure_ascii=False)),
-                    ("t-project-1", "项目调研组", "交付部", json.dumps([], ensure_ascii=False)),
-                ],
-            )
-        if not conn.execute("select 1 from users limit 1").fetchone():
-            seed_users = [
-                ("u-chen", "陈思源", "chen@example.local", "销售部", "member", "t-sales-1", "[]", "active", now()),
-                ("u-lin", "林伟", "lin@example.local", "销售部", "manager", "t-sales-1", '["t-sales-1"]', "active", now()),
-                ("u-han", "韩雪", "han@example.local", "运营管理", "admin", None, "[]", "active", now()),
-                ("u-zhao", "赵敏", "zhao@example.local", "交付部", "member", "t-project-1", "[]", "active", now()),
-            ]
-            conn.executemany(
-                """
-                insert into users(id,name,email,dept,role,team_id,managed_team_ids,status,last_active_at)
-                values(?,?,?,?,?,?,?,?,?)
-                """,
-                seed_users,
-            )
-        default_hash = hash_password(initial_password())
-        timestamp = now()
-        conn.execute(
-            """
-            update users
-            set username = coalesce(username, id),
-                email = coalesce(email, ''),
-                mobile = coalesce(mobile, ''),
-                source = coalesce(source, 'local'),
-                password_hash = coalesce(password_hash, ?),
-                must_change_password = coalesce(must_change_password, 1),
-                failed_login_count = coalesce(failed_login_count, 0),
-                created_at = coalesce(created_at, ?),
-                updated_at = coalesce(updated_at, ?)
-            """,
-            (default_hash, timestamp, timestamp),
-        )
-        if not conn.execute("select 1 from users where username = ?", ("administrator",)).fetchone():
-            conn.execute(
-                """
-                insert into users(
-                    id,username,name,email,mobile,dept,role,team_id,managed_team_ids,status,source,wecom_userid,
-                    password_hash,must_change_password,failed_login_count,last_active_at,last_login_at,created_at,updated_at
-                )
-                values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    "administrator",
-                    "administrator",
-                    "administrator",
-                    "administrator@example.local",
-                    "",
-                    "系统管理",
-                    "admin",
-                    None,
-                    "[]",
-                    "active",
-                    "local",
-                    None,
-                    hash_password(initial_password()),
-                    1,
-                    0,
-                    timestamp,
-                    None,
-                    timestamp,
-                    timestamp,
-                ),
-            )
-        else:
-            conn.execute(
-                "update users set role = 'admin', status = 'active', source = coalesce(source, 'local'), updated_at = ? where username = ?",
-                (timestamp, "administrator"),
-            )
-        if not conn.execute("select 1 from role_mappings limit 1").fetchone():
-            conn.executemany(
-                """
-                insert into role_mappings(id,match_type,match_value,role,managed_team_ids,active,priority,created_at,updated_at)
-                values(?,?,?,?,?,?,?,?,?)
-                """,
-                [
-                    (str(uuid.uuid4()), "name", "李成豹", "manager", "[]", 1, 10, timestamp, timestamp),
-                    (str(uuid.uuid4()), "local_username", "administrator", "admin", "[]", 1, 1, timestamp, timestamp),
-                ],
-            )
         if not conn.execute("select 1 from hotwords limit 1").fetchone():
             seed_hotwords = [
                 ("AhamVoice", "产品", "aham voice,aham", "系统内置", "部门共享", 10, 1),
@@ -760,8 +567,6 @@ def ensure_schema() -> None:
                 "insert into hotwords(id,word,kind,aliases,source,scope,weight,active) values(?,?,?,?,?,?,?,?)",
                 [(str(uuid.uuid4()), *row) for row in seed_hotwords],
             )
-        if not conn.execute("select 1 from audit limit 1").fetchone():
-            audit(conn, None, "system", "初始化本地数据库、用户、团队和热词。")
 
 
 def recover_interrupted_tasks() -> int:
@@ -893,34 +698,13 @@ def recover_queued_recordings() -> int:
         )
         if not rows:
             return 0
-        pending: list[tuple[str, dict[str, Any]]] = []
-        orphaned = 0
-        timestamp = now()
-        for rec in rows:
-            owner = rowdict(
-                conn.execute(
-                    "select * from users where id = ? and status = 'active'",
-                    (rec["owner_id"],),
-                ).fetchone()
-            )
-            if not owner:
-                conn.execute(
-                    """
-                    update recordings
-                    set asr_status = 'failed', updated_at = ?
-                    where id = ?
-                    """,
-                    (timestamp, rec["id"]),
-                )
-                orphaned += 1
-                continue
-            pending.append((rec["id"], normalize_user(owner)))
-        if pending or orphaned:
+        pending: list[tuple[str, dict[str, Any]]] = [(rec["id"], _LOCAL_USER) for rec in rows]
+        if pending:
             audit(
                 conn,
                 None,
                 "system",
-                f"启动恢复 queued 录音：重新入队 {len(pending)} 个，无主丢弃 {orphaned} 个。",
+                f"启动恢复 queued 录音：重新入队 {len(pending)} 个。",
             )
 
     if not pending:
@@ -955,23 +739,6 @@ def audit(conn: sqlite3.Connection, user: dict[str, Any] | None, category: str, 
     )
 
 
-def normalize_user(row: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(row)
-    payload["managed_team_ids"] = safe_json(payload.get("managed_team_ids"), [])
-    payload["username"] = payload.get("username") or payload.get("id")
-    payload["mobile"] = payload.get("mobile") or ""
-    payload["source"] = payload.get("source") or "local"
-    payload["must_change_password"] = bool(payload.get("must_change_password"))
-    payload.pop("password_hash", None)
-    payload.pop("failed_login_count", None)
-    return payload
-
-
-def normalize_team(row: dict[str, Any]) -> dict[str, Any]:
-    row["manager_ids"] = safe_json(row.get("manager_ids"), [])
-    return row
-
-
 def normalize_profile(row: dict[str, Any]) -> dict[str, Any]:
     if not row.get("scope"):
         row["scope"] = "global" if not row.get("team_id") else "team"
@@ -993,122 +760,41 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def create_session(conn: sqlite3.Connection, user_id: str) -> str:
-    token = secrets.token_urlsafe(40)
-    conn.execute(
-        "insert into sessions(token,user_id,created_at,expires_at) values(?,?,?,?)",
-        (token, user_id, now(), session_expiry()),
-    )
-    return token
-
-
-# Single-user desktop build: there is no login. One fixed local user owns all
-# data. Role 'manager' with managed_team_ids ['*'] so it can see every recording
-# (the 'admin' role is deliberately barred from the recording library).
+# Single-user mode: one fixed local user owns all data. No users table, no
+# login state (the access-password gate lives in security.py / Task 6). The
+# Header/Query params on current_user are kept so existing route signatures
+# (Depends(current_user)) and media URLs carrying ?token= keep working.
 LOCAL_USER_ID = "local-admin"
 
-
-def ensure_local_user() -> None:
-    ts = now()
-    with db() as conn:
-        if conn.execute("select 1 from users where id = ?", (LOCAL_USER_ID,)).fetchone():
-            conn.execute(
-                "update users set role='manager', managed_team_ids='[\"*\"]', status='active', updated_at=? where id=?",
-                (ts, LOCAL_USER_ID),
-            )
-            return
-        conn.execute(
-            """
-            insert into users(
-                id,username,name,email,mobile,dept,role,team_id,managed_team_ids,status,source,
-                must_change_password,failed_login_count,last_active_at,created_at,updated_at
-            )
-            values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                LOCAL_USER_ID, "local", "本机用户", "", "", "本机", "manager", None, '["*"]',
-                "active", "local", 0, 0, ts, ts, ts,
-            ),
-        )
+_LOCAL_USER = {
+    "id": LOCAL_USER_ID,
+    "name": "本机用户",
+    "role": "manager",
+    "managed_team_ids": ["*"],
+    "team_id": None,
+}
 
 
 def current_user(
     authorization: str | None = Header(default=None),
     token_query: str | None = Query(default=None, alias="token"),
 ) -> dict[str, Any]:
-    # No authentication in single-user mode. The Header/Query params are accepted
-    # but ignored so existing media URLs carrying ?token= keep working.
-    with db() as conn:
-        user = rowdict(conn.execute("select * from users where id = ?", (LOCAL_USER_ID,)).fetchone())
-    if not user:
-        ensure_local_user()
-        with db() as conn:
-            user = rowdict(conn.execute("select * from users where id = ?", (LOCAL_USER_ID,)).fetchone())
-    return normalize_user(user)
-
-
-def require_admin(user: dict[str, Any]) -> None:
-    # Single-user desktop build: the local user is always authorized.
-    return None
-
-
-def managed_team_ids(user: dict[str, Any]) -> list[str]:
-    return user.get("managed_team_ids") or ([user["team_id"]] if user.get("team_id") else [])
-
-
-def recording_where(user: dict[str, Any], scope: str = "mine") -> tuple[str, list[Any]]:
-    if user["role"] == "admin":
-        return "1=0", []
-    if user["role"] == "manager" and scope == "team":
-        team_ids = managed_team_ids(user)
-        if "*" in team_ids:
-            # 业务管理员：用普通用户界面，但看全量数据（不限团队）。
-            return "1=1", []
-        placeholders = ",".join("?" for _ in team_ids) or "?"
-        return f"recordings.team_id in ({placeholders})", team_ids or ["__none__"]
-    return "recordings.owner_id = ?", [user["id"]]
-
-
-def recording_filter_where(
-    user: dict[str, Any],
-    scope: str = "mine",
-    q: str = "",
-    meeting_type: str = "",
-) -> tuple[str, list[Any]]:
-    where, args = recording_where(user, scope)
-    filters = [where]
-    values = list(args)
-    if meeting_type and meeting_type != "全部":
-        filters.append("recordings.meeting_type = ?")
-        values.append(meeting_type)
-    if q.strip():
-        like = f"%{q.strip()}%"
-        filters.append(
-            "(recordings.title like ? or recordings.filename like ? or recordings.tag like ? or users.name like ?)"
-        )
-        values.extend([like, like, like, like])
-    return " and ".join(f"({item})" for item in filters), values
+    # No DB lookup — fixed in-process user. Params accepted but ignored.
+    return _LOCAL_USER
 
 
 def can_access_recording(conn: sqlite3.Connection, recording_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    # Single-user mode: every recording belongs to local-admin. Only check existence.
     rec = rowdict(conn.execute("select * from recordings where id = ?", (recording_id,)).fetchone())
     if not rec:
         raise HTTPException(status_code=404, detail="recording not found")
-    if user["role"] == "admin":
-        raise HTTPException(status_code=403, detail="admin console has no recording library")
-    if rec["owner_id"] == user["id"]:
-        return rec
-    if user["role"] == "manager":
-        managed = user.get("managed_team_ids") or []
-        if "*" in managed or rec["team_id"] in managed:
-            return rec
-    raise HTTPException(status_code=403, detail="recording is outside current permission scope")
+    return rec
 
 
 def recording_payload(conn: sqlite3.Connection, rec: dict[str, Any]) -> dict[str, Any]:
-    owner = rowdict(conn.execute("select name from users where id = ?", (rec["owner_id"],)).fetchone())
+    # No users table — owner_name is fixed (every recording belongs to local-admin).
     payload = dict(rec)
-    payload["owner_name"] = owner["name"] if owner else rec["owner_id"]
+    payload["owner_name"] = _LOCAL_USER["name"]
     return payload
 
 
@@ -1134,13 +820,6 @@ def task_payload(row: dict[str, Any], recording_duration: float | int | None = N
         stale_after = max(900, int(float(recording_duration or 0) * 0.45))
     payload["stale_seconds"] = silence
     payload["is_stale"] = payload.get("status") == "running" and silence > stale_after
-    return payload
-
-
-def team_payload(conn: sqlite3.Connection, row: dict[str, Any]) -> dict[str, Any]:
-    payload = normalize_team(dict(row))
-    payload["member_count"] = conn.execute("select count(*) from users where team_id = ?", (payload["id"],)).fetchone()[0]
-    payload["recording_count"] = conn.execute("select count(*) from recordings where team_id = ?", (payload["id"],)).fetchone()[0]
     return payload
 
 
@@ -2904,83 +2583,9 @@ def process_recording_background(recording_id: str, user: dict[str, Any]) -> Non
 @app.on_event("startup")
 def startup() -> None:
     ensure_schema()
-    ensure_local_user()
     recover_interrupted_tasks()
     recover_queued_recordings()
     _start_cleanup_loop()
-
-
-@app.post("/api/auth/login")
-def login(payload: dict[str, str]) -> dict[str, Any]:
-    username = (payload.get("username") or payload.get("user_id") or "").strip()
-    password = payload.get("password") or ""
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="username and password are required")
-    with db() as conn:
-        user = rowdict(
-            conn.execute(
-                """
-                select * from users
-                where lower(coalesce(username, id)) = lower(?)
-                   or lower(id) = lower(?)
-                   or lower(coalesce(email, '')) = lower(?)
-                   or coalesce(mobile, '') = ?
-                   or lower(coalesce(wecom_userid, '')) = lower(?)
-                limit 1
-                """,
-                (username, username, username, username, username),
-            ).fetchone()
-        )
-        if not user:
-            raise HTTPException(status_code=401, detail="账号或密码错误")
-        if user.get("status") != "active":
-            raise HTTPException(status_code=403, detail="账号已停用")
-        if user.get("locked_until") and user["locked_until"] > now():
-            raise HTTPException(status_code=423, detail=f"账号已锁定到 {user['locked_until']}")
-        if not verify_password(password, user.get("password_hash")):
-            failed = int(user.get("failed_login_count") or 0) + 1
-            locked_until = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S") if failed >= 5 else None
-            conn.execute(
-                "update users set failed_login_count = ?, locked_until = ?, updated_at = ? where id = ?",
-                (failed, locked_until, now(), user["id"]),
-            )
-            raise HTTPException(status_code=401, detail="账号或密码错误")
-        token = create_session(conn, user["id"])
-        conn.execute(
-            "update users set failed_login_count = 0, locked_until = null, last_login_at = ?, last_active_at = ?, updated_at = ? where id = ?",
-            (now(), now(), now(), user["id"]),
-        )
-        user = rowdict(conn.execute("select * from users where id = ?", (user["id"],)).fetchone())
-        audit(conn, normalize_user(user), "auth", "登录本地系统。")
-    return {"token": token, "user": normalize_user(user)}
-
-
-@app.post("/api/auth/logout")
-def logout(authorization: str | None = Header(default=None), user: dict[str, Any] = Depends(current_user)) -> dict[str, bool]:
-    token = (authorization or "").removeprefix("Bearer").strip()
-    with db() as conn:
-        conn.execute("delete from sessions where token = ?", (token,))
-        audit(conn, user, "auth", "退出本地系统。")
-    return {"ok": True}
-
-
-@app.post("/api/auth/change-password")
-def change_password(payload: dict[str, str], user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    current = payload.get("current_password") or ""
-    new_password = payload.get("new_password") or ""
-    if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="new password must be at least 8 characters")
-    with db() as conn:
-        row = rowdict(conn.execute("select * from users where id = ?", (user["id"],)).fetchone())
-        if not row or not verify_password(current, row.get("password_hash")):
-            raise HTTPException(status_code=401, detail="当前密码不正确")
-        conn.execute(
-            "update users set password_hash = ?, must_change_password = 0, updated_at = ? where id = ?",
-            (hash_password(new_password), now(), user["id"]),
-        )
-        changed = rowdict(conn.execute("select * from users where id = ?", (user["id"],)).fetchone())
-        audit(conn, user, "auth.password", "修改自己的登录密码。")
-    return normalize_user(changed)
 
 
 @app.get("/api/me")
@@ -3020,55 +2625,6 @@ def patch_settings(
     return _settings_view()
 
 
-SEED_ADMIN_USERNAME = "administrator"
-
-
-def _guard_admin_change(
-    conn: sqlite3.Connection,
-    actor: dict[str, Any],
-    target: dict[str, Any],
-    next_role: str | None,
-    next_status: str | None,
-) -> None:
-    """Reject admin-modifications that would self-lock or empty the admin pool.
-
-    Rules:
-    - admin cannot demote / disable themselves (force pairing-account model)
-    - cannot demote / disable the last remaining active admin
-    - cannot disable the seed `administrator` (it's the bootstrap recovery hatch
-      that ensure_schema re-asserts on every startup; disabling it just creates
-      a confusing zombie state)
-    """
-    target_id = target.get("id")
-    is_self = target_id == actor.get("id")
-    current_role = target.get("role")
-    current_status = target.get("status")
-    role_after = next_role if next_role is not None else current_role
-    status_after = next_status if next_status is not None else current_status
-    role_changing = next_role is not None and next_role != current_role
-    status_changing = next_status is not None and next_status != current_status
-
-    if is_self and role_changing and role_after != "admin":
-        raise HTTPException(status_code=403, detail="不能修改自己的角色")
-    if is_self and status_changing and status_after != "active":
-        raise HTTPException(status_code=403, detail="不能停用自己")
-
-    if target.get("username") == SEED_ADMIN_USERNAME and (
-        (role_changing and role_after != "admin") or (status_changing and status_after != "active")
-    ):
-        raise HTTPException(status_code=403, detail="不能修改种子管理员账号的角色或状态")
-
-    target_was_active_admin = current_role == "admin" and current_status == "active"
-    target_remains_active_admin = role_after == "admin" and status_after == "active"
-    if target_was_active_admin and not target_remains_active_admin:
-        other_admins = conn.execute(
-            "select count(*) from users where role = 'admin' and status = 'active' and id != ?",
-            (target_id,),
-        ).fetchone()[0]
-        if int(other_admins or 0) == 0:
-            raise HTTPException(status_code=409, detail="至少要保留一个启用的管理员")
-
-
 @app.get("/api/recordings")
 def recordings(
     scope: str = "mine",
@@ -3076,15 +2632,21 @@ def recordings(
     meeting_type: str = "",
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    where, args = recording_filter_where(user, scope, q, meeting_type)
+    # Single-user mode: every recording belongs to local-admin, no scoping by
+    # owner/team. Only optional q (title/filename/tag) and meeting_type filters.
+    filters: list[str] = []
+    args: list[Any] = []
+    if meeting_type and meeting_type != "全部":
+        filters.append("recordings.meeting_type = ?")
+        args.append(meeting_type)
+    if q.strip():
+        like = f"%{q.strip()}%"
+        filters.append("(recordings.title like ? or recordings.filename like ? or recordings.tag like ?)")
+        args.extend([like, like, like])
+    where = (" where " + " and ".join(f"({f})" for f in filters)) if filters else ""
     with db() as conn:
         rows = conn.execute(
-            f"""
-            select recordings.* from recordings
-            left join users on users.id = recordings.owner_id
-            where {where}
-            order by recordings.updated_at desc
-            """,
+            f"select * from recordings{where} order by recordings.updated_at desc",
             args,
         ).fetchall()
         return [recording_payload(conn, dict(row)) for row in rows]
@@ -3349,20 +2911,9 @@ def export_emotion(recording_id: str, user: dict[str, Any] = Depends(current_use
 
 @app.get("/api/tasks")
 def tasks(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, Any]]:
-    where, args = recording_where(user, "team" if user["role"] == "manager" else "mine")
-    if user["role"] == "admin":
-        with db() as conn:
-            return [task_payload(dict(row)) for row in conn.execute("select * from tasks order by updated_at desc limit 100").fetchall()]
+    # Single-user mode: every task belongs to local-admin, no scoping.
     with db() as conn:
-        rows = conn.execute(
-            f"""
-            select tasks.* from tasks
-            join recordings on recordings.id = tasks.recording_id
-            where {where}
-            order by tasks.updated_at desc limit 100
-            """,
-            args,
-        ).fetchall()
+        rows = conn.execute("select * from tasks order by updated_at desc limit 100").fetchall()
         return [task_payload(dict(row)) for row in rows]
 
 
@@ -3658,48 +3209,30 @@ def maintain_hotwords_api(user: dict[str, Any] = Depends(current_user)) -> dict[
 
 @app.get("/api/voiceprints")
 def voiceprints(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, Any]]:
-    if user["role"] == "admin":
-        where, args = "1=1", []
-    elif user["role"] == "manager":
-        team_ids = managed_team_ids(user)
-        placeholders = ",".join("?" for _ in team_ids) or "?"
-        where, args = f"(scope = 'global' or owner_id = ? or team_id in ({placeholders}))", [user["id"], *(team_ids or ["__none__"])]
-    else:
-        where, args = "(scope = 'global' or owner_id = ? or team_id = ?)", [user["id"], user.get("team_id")]
+    # Single-user mode: see every voiceprint (no team/owner scoping).
     with db() as conn:
         return [
             normalize_profile(row)
             for row in rowsdict(
                 conn.execute(
-                    f"select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where {where} order by created_at desc",
-                    args,
+                    "select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles order by created_at desc",
                 ).fetchall()
             )
         ]
 
 
 def resolve_voiceprint_scope(user: dict[str, Any], scope: str = "", team_id: str = "") -> tuple[str, str | None]:
-    requested_scope = scope or ("global" if user["role"] == "admin" else "team" if user["role"] == "manager" else "personal")
+    # Single-user mode: no role gating. Default to global; team/personal still
+    # honored if explicitly requested (team without team_id degrades to global).
+    requested_scope = scope or "global"
     if requested_scope not in {"personal", "team", "global"}:
         raise HTTPException(status_code=400, detail="invalid voiceprint scope")
-    if user["role"] == "member" and requested_scope != "personal":
-        raise HTTPException(status_code=403, detail="members can only create personal voiceprints")
-    if user["role"] == "manager" and requested_scope == "global":
-        raise HTTPException(status_code=403, detail="managers cannot create global voiceprints")
-    if user["role"] == "admin" and requested_scope == "personal":
-        raise HTTPException(status_code=403, detail="admins can create team or global voiceprints")
     profile_team_id = None
     if requested_scope == "team":
         profile_team_id = team_id or user.get("team_id")
-        mtids = managed_team_ids(user)
         if not profile_team_id:
-            # 业务管理员（org-wide manager，managed_team_ids 含 "*"）或管理员没有固定团队，
-            # 团队声纹退化为全局声纹（全员可见），而不是报错卡住。
-            if user["role"] == "admin" or "*" in mtids:
-                return "global", None
-            raise HTTPException(status_code=400, detail="team_id is required for team voiceprint")
-        if user["role"] == "manager" and "*" not in mtids and profile_team_id not in mtids:
-            raise HTTPException(status_code=403, detail="team is outside manager scope")
+            # No fixed team → degrade to global (visible to the single user).
+            return "global", None
     return requested_scope, profile_team_id
 
 
@@ -3852,11 +3385,8 @@ def create_voiceprint(
 
 
 def can_manage_voiceprint(profile: dict[str, Any], user: dict[str, Any]) -> bool:
-    if user["role"] == "admin":
-        return profile.get("scope") in {"global", "team"}
-    if user["role"] == "manager":
-        return profile.get("owner_id") == user["id"] or profile.get("team_id") in managed_team_ids(user)
-    return profile.get("scope") == "personal" and profile.get("owner_id") == user["id"]
+    # Single-user mode: local-admin owns everything → always manageable.
+    return True
 
 
 @app.post("/api/voiceprints/from-recording")
@@ -4098,7 +3628,7 @@ def patch_voiceprint(profile_id: str, payload: dict[str, Any], user: dict[str, A
 
 @app.get("/api/system/status")
 def system_status(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    require_admin(user)
+    # Single-user mode: no admin gate (require_admin removed).
     return {
         "base": str(BASE),
         "db": str(DB_PATH),
