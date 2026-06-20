@@ -726,17 +726,9 @@ def recover_queued_recordings() -> int:
 
 
 def audit(conn: sqlite3.Connection, user: dict[str, Any] | None, category: str, message: str, actor_name: str | None = None) -> None:
-    conn.execute(
-        "insert into audit(id,created_at,actor_id,actor_name,category,message) values(?,?,?,?,?,?)",
-        (
-            str(uuid.uuid4()),
-            now(),
-            user.get("id") if user else None,
-            actor_name or (user.get("name") if user else "系统"),
-            category,
-            message,
-        ),
-    )
+    # 审计日志已废弃（audit 表在 Task 2 删除）。保留为 no-op 兼容 ~23 个调用点，
+    # 避免每个写路由都要改。签名保持不变，调用方无需感知。
+    return None
 
 
 def normalize_profile(row: dict[str, Any]) -> dict[str, Any]:
