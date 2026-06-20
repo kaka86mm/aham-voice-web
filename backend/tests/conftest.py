@@ -2,17 +2,26 @@
 
 原项目零测试，本文件随 Task 1 建立，后续 task 按需扩充。
 """
+import importlib
+
 import pytest
 
 
 @pytest.fixture
 def tmp_home(tmp_path, monkeypatch):
-    """把 AHAMVOICE_HOME / AHAMVOICE_MODELS_DIR 指向临时目录，隔离测试不污染真实数据。
+    """把 RECORDING_AI_HOME / AHAMVOICE_MODELS_DIR 指向临时目录，隔离测试不污染真实数据。
 
-    注：config.py 的路径常量在 import 时求值。Task 3a 抽出 config.py 后，
-    此 fixture 末尾会加 importlib.reload(config) 让 env 生效。
-    当前 Task 1 阶段 config 还在 main.py，此 fixture 仅供后续 task 使用。
+    config.py 的路径常量（BASE/CONFIG_PATH 等）在 import 时求值，所以设完 env
+    后要 reload(config)，让常量基于新 env 重新求值。这样 save_user_config 等
+    写操作就落到 tmp_path 下，不碰真实数据目录。
+
+    注意 env 名：数据目录是 RECORDING_AI_HOME（原项目历史命名，未改），
+    模型目录是 AHAMVOICE_MODELS_DIR。
     """
-    monkeypatch.setenv("AHAMVOICE_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("RECORDING_AI_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("AHAMVOICE_MODELS_DIR", str(tmp_path / "models"))
-    return tmp_path
+    from backend.app import config
+    importlib.reload(config)
+    yield tmp_path
+    # 测完还原（避免污染后续测试看到的 module 状态）
+    importlib.reload(config)

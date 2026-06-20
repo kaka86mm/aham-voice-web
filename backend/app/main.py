@@ -28,101 +28,13 @@ from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parents[2]
 
-
-def load_env_file(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        from dotenv import dotenv_values
-    except ImportError:
-        # python-dotenv is in requirements.txt; missing only when the venv is
-        # not bootstrapped. Keep the API bootable without env overrides.
-        return
-    try:
-        values = dotenv_values(path) or {}
-    except Exception:
-        # Malformed .env should not block server start.
-        return
-    for key, value in values.items():
-        if value is not None:
-            os.environ.setdefault(key, str(value))
-
-
-load_env_file(ROOT / ".env.local")
-load_env_file(ROOT / ".env")
-
-def _default_base() -> Path:
-    # Per-user writable data dir (DB, recordings, config.json). Overridable
-    # via RECORDING_AI_HOME.
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "AhamVoice"
-    return Path.home() / ".cache" / "recording-ai"
-
-
-BASE = Path(os.environ.get("RECORDING_AI_HOME") or _default_base())
-APP_DATA = BASE / "app-data"
-DB_PATH = APP_DATA / "ahamvoice.sqlite3"
-RECORDINGS = APP_DATA / "recordings"
-EXPORTS = APP_DATA / "exports"
-TMP = APP_DATA / "tmp"
-# Models and ffmpeg are read-only assets that may live inside the .app bundle
-# (the desktop launcher points AHAMVOICE_MODELS_DIR / AHAMVOICE_BIN_DIR at the
-# bundle's Resources). They default to BASE/... for the classic deployment so
-# the writable data dir (BASE) and the read-only assets can be split apart.
-MODELS = Path(os.environ.get("AHAMVOICE_MODELS_DIR") or (BASE / "models" / "modelscope" / "iic"))
-VAD = MODELS / "speech_fsmn_vad_zh-cn-16k-common-pytorch"
-PUNC = MODELS / "punc_ct-transformer_cn-en-common-vocab471067-large"
-PARAFORMER = MODELS / "speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
-CAMPLUS = MODELS / "speech_campplus_sv_zh-cn_16k-common"
-EMOTION = MODELS / "emotion2vec_plus_large"
-VOICEPRINTS = BASE / "voiceprints"
-BIN_DIR = Path(os.environ.get("AHAMVOICE_BIN_DIR") or (BASE / "bin"))
-FFMPEG = BIN_DIR / "ffmpeg"
-FFPROBE = BIN_DIR / "ffprobe"
-os.environ["PATH"] = f"{BIN_DIR}:{os.environ.get('PATH', '')}"
-
-for path in [APP_DATA, RECORDINGS, EXPORTS, TMP, VOICEPRINTS]:
-    path.mkdir(parents=True, exist_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Runtime config (config.json in the writable data dir). Single-user desktop
-# mode keeps the DeepSeek API key here instead of .env so it survives next to a
-# read-only .app bundle and can be edited from the in-app Settings page. Env
-# vars still win, so the classic local-venv deployment is unchanged.
-# ---------------------------------------------------------------------------
-CONFIG_PATH = BASE / "config.json"
-
-
-def load_user_config() -> dict[str, Any]:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_user_config(updates: dict[str, Any]) -> dict[str, Any]:
-    data = load_user_config()
-    data.update(updates)
-    BASE.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, indent=2)
-    tmp.replace(CONFIG_PATH)
-    return data
-
-
-def get_deepseek_config() -> tuple[str, str, str]:
-    """Return (api_key, api_base, model): env wins, then config.json, then default."""
-    cfg = load_user_config()
-    api_key = (os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_api_key") or "").strip()
-    base = (
-        os.environ.get("DEEPSEEK_API_BASE") or cfg.get("deepseek_api_base") or "https://api.deepseek.com"
-    ).rstrip("/")
-    model = (os.environ.get("DEEPSEEK_MODEL") or cfg.get("deepseek_model") or "deepseek-v4-pro").strip()
-    return api_key, base, model
+from .config import (
+    BASE, APP_DATA, DB_PATH, RECORDINGS, EXPORTS, TMP,
+    MODELS, VAD, PUNC, PARAFORMER, CAMPLUS, EMOTION, VOICEPRINTS,
+    BIN_DIR, FFMPEG, FFPROBE, CONFIG_PATH,
+    load_user_config, save_user_config, get_deepseek_config,
+    env_int, env_float, env_bool, env_json,
+)
 
 
 app = FastAPI(title="AhamVoice Local API", version="0.1.0")
