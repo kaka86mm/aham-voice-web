@@ -52,19 +52,17 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-_asr_model: Any | None = None
-_speaker_verifier: Any | None = None
-_emotion_model: Any | None = None
-# FunASR's AutoModel and the modelscope speaker_verification pipeline both keep
-# internal state across calls (cache dicts, tensor buffers, optional CUDA
-# context). Concurrent invocations from starlette's threadpool — one upload
-# transcribing while the user also clicks "重新转写" on another — corrupt that
-# state. Serialize ASR + verifier work on a single process-wide lock.
-_asr_lock = threading.Lock()
-_asr_init_lock = threading.Lock()
-_verifier_init_lock = threading.Lock()
-_emotion_init_lock = threading.Lock()
-DEFAULT_VOICEPRINT_THRESHOLD = 0.66
+from . import state
+from .state import (
+    asr_lock as _asr_lock,
+    asr_init_lock as _asr_init_lock,
+    verifier_init_lock as _verifier_init_lock,
+    emotion_init_lock as _emotion_init_lock,
+    DEFAULT_VOICEPRINT_THRESHOLD,
+)
+# 模型单例（_asr_model/_speaker_verifier/_emotion_model）通过 state 模块属性
+# 读写（state.asr_model = ...），不再用 main.py 的全局变量。
+# 锁用别名（_asr_lock 等）保持现有 with _asr_lock 引用不变。
 
 
 @contextmanager
@@ -1051,10 +1049,9 @@ def split_audio(source: Path, workdir: Path, segment_seconds: int) -> list[Path]
 
 
 def get_asr_model() -> Any:
-    global _asr_model
-    if _asr_model is None:
+    if state.asr_model is None:
         with _asr_init_lock:
-            if _asr_model is None:
+            if state.asr_model is None:
                 missing = [str(path) for path in [PARAFORMER, VAD, PUNC, CAMPLUS] if not path.exists()]
                 if missing:
                     raise RuntimeError(f"ASR/diarization model missing: {', '.join(missing)}")
@@ -1072,7 +1069,7 @@ def get_asr_model() -> Any:
                 except Exception:
                     pass
 
-                _asr_model = AutoModel(
+                state.asr_model = AutoModel(
                     model=str(PARAFORMER),
                     vad_model=str(VAD),
                     vad_kwargs={"max_single_segment_time": int(os.environ.get("AHAMVOICE_VAD_MAX_SEGMENT_MS", "30000"))},
@@ -1081,19 +1078,18 @@ def get_asr_model() -> Any:
                     device=device,
                     disable_update=True,
                 )
-    return _asr_model
+    return state.asr_model
 
 
 def get_speaker_verifier() -> Any:
-    global _speaker_verifier
-    if _speaker_verifier is None:
+    if state.speaker_verifier is None:
         with _verifier_init_lock:
-            if _speaker_verifier is None:
+            if state.speaker_verifier is None:
                 from modelscope.pipelines import pipeline
                 from modelscope.utils.constant import Tasks
 
-                _speaker_verifier = pipeline(task=Tasks.speaker_verification, model=str(CAMPLUS))
-    return _speaker_verifier
+                state.speaker_verifier = pipeline(task=Tasks.speaker_verification, model=str(CAMPLUS))
+    return state.speaker_verifier
 
 
 def voiceprint_threshold_default() -> float:
@@ -2210,16 +2206,15 @@ def emotion_label_cn(raw: str) -> str:
 
 
 def get_emotion_model() -> Any:
-    global _emotion_model
-    if _emotion_model is None:
+    if state.emotion_model is None:
         with _emotion_init_lock:
-            if _emotion_model is None:
+            if state.emotion_model is None:
                 if not EMOTION.exists():
                     raise RuntimeError(f"情绪模型缺失：{EMOTION}")
                 from funasr import AutoModel
 
-                _emotion_model = AutoModel(model=str(EMOTION), disable_update=True)
-    return _emotion_model
+                state.emotion_model = AutoModel(model=str(EMOTION), disable_update=True)
+    return state.emotion_model
 
 
 def analyze_segment_emotion(wav_path: str) -> tuple[str, float]:
