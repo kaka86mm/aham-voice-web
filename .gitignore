@@ -22,6 +22,8 @@ frontend-src/dist-ssr/
 # ---------- Runtime state (machine-local) ----------
 logs/
 .run/
+data/
+models/
 
 # ---------- OS / editors ----------
 .DS_Store

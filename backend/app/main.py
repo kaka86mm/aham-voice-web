@@ -184,6 +184,12 @@ def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     return user
 
 
+@app.get("/api/health")
+def health() -> dict[str, bool]:
+    """健康检查端点。Docker HEALTHCHECK 和密码门白名单都用它，无需鉴权。"""
+    return {"ok": True}
+
+
 def _settings_view() -> dict[str, Any]:
     api_key, base, model = get_deepseek_config()
     return {
