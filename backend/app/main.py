@@ -32,7 +32,7 @@ from .config import (
     BASE, APP_DATA, DB_PATH, RECORDINGS, EXPORTS, TMP,
     MODELS, VAD, PUNC, PARAFORMER, CAMPLUS, EMOTION, VOICEPRINTS,
     BIN_DIR, FFMPEG, FFPROBE, CONFIG_PATH,
-    load_user_config, save_user_config, get_deepseek_config,
+    load_user_config, save_user_config, get_llm_config,
     env_int, env_float, env_bool, env_json,
 )
 
@@ -191,8 +191,13 @@ def health() -> dict[str, bool]:
 
 
 def _settings_view() -> dict[str, Any]:
-    api_key, base, model = get_deepseek_config()
+    api_key, base, model = get_llm_config()
+    # 同时返回 llm_* (新) 和 deepseek_* (旧别名)，前端切换期间两边都能读。
     return {
+        "llm_configured": bool(api_key),
+        "llm_api_base": base,
+        "llm_model": model,
+        # 旧别名（前端改造完成前兼容；读取时 get_llm_config 已回退 deepseek_*）
         "deepseek_configured": bool(api_key),
         "deepseek_api_base": base,
         "deepseek_model": model,
@@ -210,13 +215,22 @@ def patch_settings(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     updates: dict[str, Any] = {}
-    # An empty string explicitly clears the stored value.
-    if "deepseek_api_key" in payload:
-        updates["deepseek_api_key"] = (payload.get("deepseek_api_key") or "").strip()
-    if "deepseek_api_base" in payload:
-        updates["deepseek_api_base"] = (payload.get("deepseek_api_base") or "").strip() or "https://api.deepseek.com"
-    if "deepseek_model" in payload:
-        updates["deepseek_model"] = (payload.get("deepseek_model") or "").strip() or "deepseek-v4-pro"
+    # 接受 llm_* (新) 和 deepseek_* (旧)，统一存到 llm_* 键。
+    api_key = payload.get("llm_api_key")
+    if api_key is None:
+        api_key = payload.get("deepseek_api_key")
+    if api_key is not None:
+        updates["llm_api_key"] = api_key.strip()
+    api_base = payload.get("llm_api_base")
+    if api_base is None:
+        api_base = payload.get("deepseek_api_base")
+    if api_base is not None:
+        updates["llm_api_base"] = api_base.strip()
+    model = payload.get("llm_model")
+    if model is None:
+        model = payload.get("deepseek_model")
+    if model is not None:
+        updates["llm_model"] = model.strip()
     if updates:
         save_user_config(updates)
     return _settings_view()
@@ -1156,8 +1170,11 @@ def system_status(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any
         "punc": PUNC.exists(),
         "voiceprint": CAMPLUS.exists(),
         "ffmpeg": FFMPEG.exists(),
-        "deepseek_configured": bool(get_deepseek_config()[0]),
-        "deepseek_model": get_deepseek_config()[2],
+        "llm_configured": bool(get_llm_config()[0]),
+        "llm_model": get_llm_config()[2],
+        # 旧别名（前端切换期兼容）
+        "deepseek_configured": bool(get_llm_config()[0]),
+        "deepseek_model": get_llm_config()[2],
         "segmentation": "fsmn-vad dynamic segmentation",
         "diarization": "cam++ speaker diarization",
     }

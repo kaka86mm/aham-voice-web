@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from .config import env_int, EXPORTS, get_deepseek_config
+from .config import env_int, EXPORTS, get_llm_config
 from .db import (
     db, now, rowdict, safe_json, slug, seconds_label,
     create_task, update_task, can_access_recording, audit,
@@ -133,9 +133,9 @@ def meeting_template(meeting_type: str) -> str:
 
 
 async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, str]:
-    api_key, base, model = get_deepseek_config()
+    api_key, base, model = get_llm_config()
     if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        raise RuntimeError("LLM_API_KEY is not configured")
 
     chunk_chars = env_int("AHAMVOICE_SUMMARY_CHUNK_CHARS", 18000, 8000, 28000)
     chunks = [text[i : i + chunk_chars] for i in range(0, len(text), chunk_chars)] or [""]
@@ -228,9 +228,9 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
 
 
 async def call_deepseek_revision(instruction: str, base_summary: str, transcript: str, rec: dict[str, Any]) -> tuple[str, str]:
-    api_key, base, model = get_deepseek_config()
+    api_key, base, model = get_llm_config()
     if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        raise RuntimeError("LLM_API_KEY is not configured")
 
     if len(transcript) <= 26000:
         transcript_context = transcript

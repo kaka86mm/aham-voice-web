@@ -256,8 +256,12 @@ export interface SystemStatus {
   punc: boolean;
   voiceprint: boolean;
   ffmpeg: boolean;
-  deepseek_configured: boolean;
-  deepseek_model: string;
+  llm_configured: boolean;
+  llm_model: string;
+  /** @deprecated 旧别名，后端仍返回，新代码用 llm_configured */
+  deepseek_configured?: boolean;
+  /** @deprecated 旧别名 */
+  deepseek_model?: string;
   segmentation: string;
   diarization: string;
 }
@@ -311,7 +315,11 @@ export interface RecordingDetail {
 }
 
 export interface Settings {
-  deepseek_configured: boolean;
-  deepseek_api_base: string;
-  deepseek_model: string;
+  llm_configured: boolean;
+  llm_api_base: string;
+  llm_model: string;
+  /** @deprecated 旧别名，后端仍返回 */
+  deepseek_configured?: boolean;
+  deepseek_api_base?: string;
+  deepseek_model?: string;
 }

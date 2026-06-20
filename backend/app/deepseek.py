@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from .config import get_deepseek_config, env_int
+from .config import get_llm_config, env_int
 
 
 async def _deepseek_post_with_retry(
@@ -55,9 +55,9 @@ async def _deepseek_post_with_retry(
 
 
 def call_deepseek_emotion(annotated_transcript: str, rec: dict[str, Any], acoustic_md: str) -> tuple[str, str]:
-    api_key, base, model = get_deepseek_config()
+    api_key, base, model = get_llm_config()
     if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is not configured")
+        raise RuntimeError("LLM_API_KEY is not configured")
     transcript = annotated_transcript
     if len(transcript) > 48000:
         transcript = transcript[:26000] + "\n\n[中间过长省略，仅保留首尾]\n\n" + transcript[-18000:]

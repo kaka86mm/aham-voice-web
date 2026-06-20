@@ -41,7 +41,7 @@ export async function fetchMe(): Promise<User> {
   return data;
 }
 
-// -------- settings (DeepSeek API key) --------
+// -------- settings (OpenAI-compatible LLM endpoint) --------
 
 export async function fetchSettings(): Promise<Settings> {
   const { data } = await api.get<Settings>("/settings");
@@ -49,9 +49,9 @@ export async function fetchSettings(): Promise<Settings> {
 }
 
 export async function patchSettings(payload: Partial<{
-  deepseek_api_key: string;
-  deepseek_api_base: string;
-  deepseek_model: string;
+  llm_api_key: string;
+  llm_api_base: string;
+  llm_model: string;
 }>): Promise<Settings> {
   const { data } = await api.patch<Settings>("/settings", payload);
   return data;

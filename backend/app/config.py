@@ -97,15 +97,42 @@ def save_user_config(updates: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def get_deepseek_config() -> tuple[str, str, str]:
-    """Return (api_key, api_base, model): env wins, then config.json, then default."""
+def get_llm_config() -> tuple[str, str, str]:
+    """Return (api_key, api_base, model) for an OpenAI-compatible chat endpoint.
+
+    Priority: new LLM_* env / llm_* config key wins, then legacy DEEPSEEK_* env /
+    deepseek_* config key (backward compat), then default. Default base/model point
+    at DeepSeek so the box stays usable out-of-the-box; switch in the Settings page
+    to target any OpenAI-compatible endpoint (通义/Kimi/Ollama/vLLM/OpenAI ...).
+    """
     cfg = load_user_config()
-    api_key = (os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_api_key") or "").strip()
+    api_key = (
+        os.environ.get("LLM_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
+        or cfg.get("llm_api_key")
+        or cfg.get("deepseek_api_key")
+        or ""
+    ).strip()
     base = (
-        os.environ.get("DEEPSEEK_API_BASE") or cfg.get("deepseek_api_base") or "https://api.deepseek.com"
+        os.environ.get("LLM_API_BASE")
+        or os.environ.get("DEEPSEEK_API_BASE")
+        or cfg.get("llm_api_base")
+        or cfg.get("deepseek_api_base")
+        or "https://api.deepseek.com"
     ).rstrip("/")
-    model = (os.environ.get("DEEPSEEK_MODEL") or cfg.get("deepseek_model") or "deepseek-v4-pro").strip()
+    model = (
+        os.environ.get("LLM_MODEL")
+        or os.environ.get("DEEPSEEK_MODEL")
+        or cfg.get("llm_model")
+        or cfg.get("deepseek_model")
+        or "deepseek-v4-pro"
+    ).strip()
     return api_key, base, model
+
+
+def get_deepseek_config() -> tuple[str, str, str]:
+    """Deprecated alias for get_llm_config (kept for backward-compat imports)."""
+    return get_llm_config()
 
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
