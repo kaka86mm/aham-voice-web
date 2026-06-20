@@ -37,7 +37,7 @@ from .config import (
 )
 
 
-app = FastAPI(title="AhamVoice Local API", version="0.1.0")
+app = FastAPI(title="AhamVoice Local API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -51,6 +51,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+# 单密码门（密码为空则不拦截）。auth router 提供登录端点 + 单例 Security。
+from .routes.auth import router as _auth_router, get_security
+from .security import SecurityMiddleware
+app.add_middleware(SecurityMiddleware, security=get_security())
+app.include_router(_auth_router)
 
 from . import state
 from .state import (
@@ -149,39 +154,6 @@ def current_user(
 ) -> dict[str, Any]:
     # No DB lookup — fixed in-process user. Params accepted but ignored.
     return _LOCAL_USER
-
-
-def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
-    try:
-        value = int(os.environ.get(name, str(default)))
-    except ValueError:
-        value = default
-    return max(minimum, min(value, maximum))
-
-
-def env_float(name: str, default: float, minimum: float, maximum: float) -> float:
-    try:
-        value = float(os.environ.get(name, str(default)))
-    except ValueError:
-        value = default
-    return max(minimum, min(value, maximum))
-
-
-def env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def env_json(name: str, default: Any) -> Any:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return default
 
 
 # ---------------------------------------------------------------------------
