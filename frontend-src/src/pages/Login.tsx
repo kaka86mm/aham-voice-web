@@ -31,9 +31,7 @@ export function Login() {
 
   return (
     <form className="auth-form" onSubmit={submit}>
-      <h1 className="auth-form__title">
-        访问 <em>密码</em>
-      </h1>
+      <h1 className="auth-form__title">访问密码</h1>
       <p className="auth-form__lede">
         本服务需要密码访问。请输入访问密码后进入。
       </p>
