@@ -114,8 +114,6 @@ from .asr import (
 )
 
 
-@contextmanager
-
 def probe_duration(path: Path) -> float:
     if not FFPROBE.exists():
         return 0.0
