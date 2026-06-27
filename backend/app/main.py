@@ -518,6 +518,15 @@ def export_emotion(recording_id: str, user: dict[str, Any] = Depends(current_use
     return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=path.name)
 
 
+@app.post("/api/recordings/{recording_id}/discover-hotwords")
+async def rediscover_hotwords(recording_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """手动重新从该录音的转写+纪要抽取候选词。"""
+    from .hotword_discover import discover_hotwords
+    with db() as conn:
+        can_access_recording(conn, recording_id, user)
+    return await discover_hotwords(recording_id)
+
+
 @app.get("/api/tasks")
 def tasks(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, Any]]:
     # Single-user mode: every task belongs to local-admin, no scoping.
@@ -533,6 +542,7 @@ def normalize_hotword(row: dict[str, Any]) -> dict[str, Any]:
     payload["frequency"] = int(payload.get("frequency") or 0)
     payload["weight"] = int(payload.get("weight") or 0)
     payload["score"] = round(float(payload.get("score") or hotword_row_score(payload)), 1)
+    payload["example"] = payload.get("example")
     return payload
 
 
@@ -814,6 +824,62 @@ def maintain_hotwords_api(user: dict[str, Any] = Depends(current_user)) -> dict[
         result = maintain_hotwords(conn)
         audit(conn, user, "hotword.maintain", f"{user['name']} 重新计算热词评分，过期 {result.get('expired', 0)} 条。")
         return {**result, "status": hotword_status_payload(conn)}
+
+
+@app.get("/api/hotwords/candidates")
+def hotword_candidates(
+    sort: str = "frequency",
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    """候选词（state=candidate）列表。默认按频次降序。"""
+    order = {"frequency": "frequency desc, confidence desc", "confidence": "confidence desc", "time": "last_seen_at desc"}.get(sort, "frequency desc, confidence desc")
+    with db() as conn:
+        rows = conn.execute(
+            f"select * from hotwords where state = 'candidate' order by {order} limit 200"
+        ).fetchall()
+        return [normalize_hotword(dict(r)) for r in rows]
+
+
+@app.post("/api/hotwords/candidates/confirm")
+def confirm_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """批量确认候选词：state candidate→active。edits 可纠正写法/分类。"""
+    ids = payload.get("ids") or []
+    edits = payload.get("edits") or {}
+    ts = now()
+    confirmed = 0
+    with db() as conn:
+        for hid in ids:
+            e = edits.get(hid, {})
+            assignments = "state = 'active', active = 1, updated_at = ?"
+            params: list[Any] = [ts]
+            if e.get("word"):
+                assignments += ", word = ?"
+                params.append(e["word"].strip())
+            if e.get("kind"):
+                assignments += ", kind = ?"
+                params.append(e["kind"])
+            params.append(hid)
+            cursor = conn.execute(f"update hotwords set {assignments} where id = ? and state = 'candidate'", params)
+            confirmed += cursor.rowcount
+        audit(conn, user, "hotword.confirm", f"确认 {confirmed} 个候选热词。")
+    return {"confirmed": confirmed}
+
+
+@app.post("/api/hotwords/candidates/discard")
+def discard_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """批量丢弃候选词：state candidate→discarded。"""
+    ids = payload.get("ids") or []
+    if not ids:
+        return {"discarded": 0}
+    ts = now()
+    placeholders = ",".join("?" for _ in ids)
+    with db() as conn:
+        cursor = conn.execute(
+            f"update hotwords set state = 'discarded', active = 0, updated_at = ? where id in ({placeholders}) and state = 'candidate'",
+            [ts, *ids],
+        )
+        audit(conn, user, "hotword.discard", f"丢弃 {cursor.rowcount} 个候选热词。")
+    return {"discarded": cursor.rowcount}
 
 
 @app.get("/api/voiceprints")

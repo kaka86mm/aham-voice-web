@@ -465,4 +465,11 @@ def process_recording_background(recording_id: str, user: dict[str, Any]) -> Non
             last = rowdict(conn.execute("select id from tasks where recording_id = ? order by created_at desc limit 1", (recording_id,)).fetchone())
             if last:
                 update_task(conn, last["id"], "failed", 100, str(exc))
+        return
+    # 纪要完成后触发候选词发现（转写+纪要此时都有，一次抽全）
+    try:
+        from .hotword_discover import discover_hotwords
+        asyncio.run(discover_hotwords(recording_id))
+    except Exception:
+        pass  # 发现失败不阻塞主流程
 
