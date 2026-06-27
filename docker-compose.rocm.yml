@@ -1,16 +1,19 @@
 # ROCm override：docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d
-# 适用于 AMD GPU（gfx1151/Radeon 8060S 等）+ ROCm 7.x 宿主。
-# 覆盖默认 CPU 配置：换 rocm 镜像 + 透传 GPU 设备 + device=cuda。
+# 适用于 AMD GPU（gfx1151/Radeon 8060S 等）+ ROCm 宿主。
+# 注意：group_add 的 gid 必须按宿主实际值改（getent group render/video）。
 services:
   ahamvoice:
     build:
       dockerfile: Dockerfile.rocm
+      args:
+        # 宿主已有的 ROCm+PyTorch 镜像（零下载）。各机器不同，按实际改。
+        ROCM_BASE: cortibox-rocm-base:latest
     image: aham-voice-web:rocm
     environment:
       - AHAMVOICE_ASR_DEVICE=cuda
       # 若报 "no kernel image available" 取消下行注释：
       # - HSA_OVERRIDE_GFX_VERSION=11.0.0
-    # ROCm GPU 透传（/dev/kfd + /dev/dri）。容器内进程要在 render 组才能访问。
+    # ROCm GPU 透传（/dev/kfd + /dev/dri）。容器进程要在 render 组才能访问。
     device_cgroup_rules:
       - "c 226:* rmw"
       - "c 511:* rmw"
@@ -18,7 +21,8 @@ services:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
     group_add:
-      - "990"   # 宿主 render 组 gid（让容器进程能访问 /dev/kfd/renderD128）
-      - "44"    # video 组 gid
-    # IPC 钅（ROCm 共享内存需要；不设可能 OOM 或hang）
+      # ⚠ 按宿主实际改：getent group render | cut -d: -f3
+      - "992"   # render gid（本机 100.66.1.22）
+      - "44"    # video gid
+    # ROCm 共享内存需要 host IPC（不设可能 OOM/hang）
     ipc: host

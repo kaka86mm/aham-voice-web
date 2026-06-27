@@ -1,10 +1,11 @@
-# ROCm 版（AMD GPU，gfx1151/Radeon 8060S 等 Navi/RDNA 架构）。
-# 基镜像复用宿主已有的 rocm/vllm-dev:navi 变体——ROCm 7.1 + PyTorch 2.8
-# + navi 构建（原生支持消费级 Navi/RDNA 显卡，gfx1151 在列）。
-# 用本地镜像 = 零下载；navi 变体避免 "no kernel image" 问题。
-FROM rocm/vllm-dev:rocm7.1_navi_ubuntu24.04_py3.12_pytorch_2.8_vllm_0.10.2rc1
+# ROCm 版（AMD GPU，gfx1151/Radeon 8060S 等）。
+# 基镜像通过 ROCM_BASE build arg 指定——用宿主已有的 ROCm+PyTorch 镜像
+# （零下载，避免从 Docker Hub 拉 ~10GB）。要求基镜像含 python3 + torch ROCm 版。
+# 各机器在 docker-compose.rocm.yml 里覆盖 ROCM_BASE 指向本地镜像。
+ARG ROCM_BASE=cortibox-rocm-base:latest
+FROM ${ROCM_BASE}
 
-# 基镜像已有 torch 2.8 + ROCm runtime + conda python 3.12。补 ffmpeg + 音频依赖。
+# 基镜像已有 torch + ROCm runtime。补 ffmpeg + 音频依赖（若已有一笔带过）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg libsndfile1 && \
     rm -rf /var/lib/apt/lists/*
