@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
-import { Field, FormRow } from "@/components/Field";
+import { Field } from "@/components/Field";
 import { Diag } from "@/components/Diag";
 import { api, readApiError } from "@/api/client";
 
@@ -30,22 +30,27 @@ export function Login() {
   }
 
   return (
-    <form className="auth-card" onSubmit={submit}>
-      <h1 className="auth-card__title">访问密码</h1>
-      <p className="auth-card__hint">本服务需要密码访问。请输入访问密码。</p>
+    <form className="auth-form" onSubmit={submit}>
+      <h1 className="auth-form__title">
+        访问 <em>密码</em>
+      </h1>
+      <p className="auth-form__lede">
+        本服务需要密码访问。请输入访问密码后进入。
+      </p>
       {error && <Diag code="AUTH_E_LOGIN">{error}</Diag>}
-      <FormRow label="访问密码">
-        <Field
-          type="password"
-          value={password}
-          autoComplete="current-password"
-          onChange={(e) => setPassword(e.target.value)}
-          autoFocus
-        />
-      </FormRow>
-      <Button type="submit" variant="primary" loading={loading} disabled={!password}>
-        进入
-      </Button>
+      <Field
+        type="password"
+        value={password}
+        placeholder="访问密码"
+        autoComplete="current-password"
+        onChange={(e) => setPassword(e.target.value)}
+        autoFocus
+      />
+      <div className="auth-form__primary">
+        <Button type="submit" variant="primary" loading={loading} disabled={!password} style={{ width: "100%" }}>
+          进入
+        </Button>
+      </div>
     </form>
   );
 }
