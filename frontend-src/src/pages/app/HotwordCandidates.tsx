@@ -56,8 +56,8 @@ export function HotwordCandidates() {
     const edits: Record<string, { word?: string; kind?: string }> = {};
     if (editWord) edits[editingId] = { ...(edits[editingId] || {}), word: editWord };
     if (editKind) edits[editingId] = { ...(edits[editingId] || {}), kind: editKind };
-    const ids = [...new Set([...selected, editingId])];
-    confirm.mutate({ ids, edits: Object.keys(edits).length > 0 ? edits : undefined });
+    // 只确认正在编辑的这一个词（不自动合并已勾选的，防误触批量确认）
+    confirm.mutate({ ids: [editingId], edits: Object.keys(edits).length > 0 ? edits : undefined });
   }
 
   const items = candidates.data ?? [];
@@ -70,10 +70,10 @@ export function HotwordCandidates() {
         <Button variant="ghost" size="sm" onClick={() => setSelected(allSelected ? new Set() : new Set(items.map((i) => i.id)))}>
           {allSelected ? "取消全选" : "全选"}
         </Button>
-        <Button variant="primary" size="sm" disabled={selected.size === 0} loading={confirm.isPending} onClick={() => confirm.mutate({ ids: [...selected] })}>
+        <Button variant="primary" size="sm" disabled={selected.size === 0} loading={confirm.isPending} onClick={() => { if (window.confirm(`确认将 ${selected.size} 个词加入正式热词库？加入后会参与后续转写纠错。`)) confirm.mutate({ ids: [...selected] }); }}>
           确认选中 ({selected.size})
         </Button>
-        <Button variant="danger" size="sm" disabled={selected.size === 0} loading={discard.isPending} onClick={() => discard.mutate()}>
+        <Button variant="danger" size="sm" disabled={selected.size === 0} loading={discard.isPending} onClick={() => { if (window.confirm(`确定丢弃 ${selected.size} 个候选词？丢弃后不再推荐。`)) discard.mutate(); }}>
           丢弃选中
         </Button>
         <span className="meta" style={{ marginLeft: "auto", fontSize: "var(--text-xs)", color: "var(--fg-subtle)" }}>
