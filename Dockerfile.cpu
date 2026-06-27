@@ -28,6 +28,6 @@ EXPOSE 8765
 
 # 健康检查（密码门白名单放行 /api/health）
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')" || exit 1
+    CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"AHAMVOICE_PORT\",\"8765\")}/api/health')" || exit 1
 
-CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["sh", "-c", "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${AHAMVOICE_PORT:-8765}"]

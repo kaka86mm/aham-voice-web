@@ -5,21 +5,30 @@
 ARG ROCM_BASE=cortibox-rocm-base:latest
 FROM ${ROCM_BASE}
 
-# 基镜像已有 torch + ROCm runtime。补 ffmpeg + 音频依赖（若已有一笔带过）。
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 基镜像已有 torch + ROCm runtime。补 ffmpeg + 音频依赖。
+# 先换国内 apt 源（阿里云 jammy）+ pip 源，境外源在国内极慢。
+RUN sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && \
+    sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
+    pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set global.trusted-host mirrors.aliyun.com && \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg libsndfile1 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 装应用 ASR 依赖（funasr/modelscope/librosa 等）。
-# 关键：必须排除 torch/torchaudio——requirements-asr 里 pin 了 torch==2.12，
-# pip 会从 PyPI 拉 CUDA 版覆盖基镜像的 ROCm torch，导致 GPU 失效。
-# 基镜像已提供 ROCm 版 torch，这里只装其余依赖。
-COPY backend/requirements.txt backend/requirements-asr.txt ./backend/
-RUN grep -ivE "^(torch|torchaudio|torchvision)==" backend/requirements-asr.txt > /tmp/asr-deps.txt && \
-    pip install --no-cache-dir --no-deps -r /tmp/asr-deps.txt && \
-    pip install --no-cache-dir -r backend/requirements.txt
+# 装 funasr + ASR 依赖。
+# 注意：不装 requirements-asr.txt——它的版本 pin 是按 Python 3.12 锁的，
+# 而基镜像可能是 3.10（networkx==3.6.1 等要求 >=3.11 会失败）。
+# 改为让 funasr 自己解决依赖（它会选当前 python 兼容的版本），只显式约束
+# torch 不被覆盖（--constraint 强制用基镜像已有的 ROCm torch）。
+COPY backend/requirements.txt ./backend/
+RUN TORCH_VER=$(python -c "import torch; print(torch.__version__.split(chr(43))[0])") && \
+    TA_VER=$(python -c "import torchaudio; print(torchaudio.__version__.split(chr(43))[0])") && \
+    echo "torch==${TORCH_VER}" > /tmp/constraints.txt && \
+    echo "torchaudio==${TA_VER}" >> /tmp/constraints.txt && \
+    pip install --no-cache-dir -r backend/requirements.txt && \
+    pip install --no-cache-dir -c /tmp/constraints.txt funasr modelscope librosa soundfile scipy scikit-learn
 
 COPY backend/ ./backend/
 COPY frontend/dist/ ./frontend/dist/
@@ -37,6 +46,6 @@ VOLUME ["/models", "/data"]
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')" || exit 1
+    CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"AHAMVOICE_PORT\",\"8765\")}/api/health')" || exit 1
 
-CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["sh", "-c", "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${AHAMVOICE_PORT:-8765}"]
