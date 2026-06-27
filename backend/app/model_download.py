@@ -39,7 +39,18 @@ def ensure_models(models_dir: Path) -> None:
     for name in missing:
         print(f"[models] 下载 {name} ...", flush=True)
         try:
-            snapshot_download(f"iic/{name}", cache_dir=str(models_dir.parent))
+            # snapshot_download(f"iic/{name}", cache_dir=X) 落到 X/iic/name。
+            # 我们要模型直接在 models_dir/name（config 的 VAD/PARAFORMER 等按此找），
+            # 所以下载后把 X/iic/name 移到 models_dir/name（去掉 iic 命名空间层）。
+            import shutil
+            tmp_cache = models_dir / ".dl_cache"
+            snapshot_download(f"iic/{name}", cache_dir=str(tmp_cache))
+            src = tmp_cache / "iic" / name
+            dst = models_dir / name
+            if src.exists():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.move(str(src), str(dst))
             print(f"[models] 完成 {name}", flush=True)
         except Exception as exc:
             print(f"[models] 失败 {name}: {exc}", flush=True)
