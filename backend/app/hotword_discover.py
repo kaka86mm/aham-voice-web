@@ -31,3 +31,27 @@ def _parse_llm_json(content: str) -> list[dict[str, Any]]:
     if not isinstance(terms, list):
         return []
     return terms
+
+
+def _dedupe_against_db(candidates: list[dict[str, Any]], recording_id: str) -> list[dict[str, Any]]:
+    """过滤掉已在库的词（active/candidate/protected 跳过，discarded 跳过）+ 同批去重。"""
+    from .db import db
+    with db() as conn:
+        existing = {
+            row["word"].lower()
+            for row in conn.execute(
+                "select word from hotwords where state in ('active', 'candidate', 'protected')"
+            ).fetchall()
+        }
+        discarded = {
+            row["word"].lower()
+            for row in conn.execute("select word from hotwords where state = 'discarded'").fetchall()
+        }
+    result = []
+    for c in candidates:
+        w = (c.get("word") or "").strip().lower()
+        if not w or w in existing or w in discarded:
+            continue
+        existing.add(w)  # 同批内去重
+        result.append(c)
+    return result
