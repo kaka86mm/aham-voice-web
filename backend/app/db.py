@@ -351,6 +351,7 @@ def ensure_schema() -> None:
             "expires_at": "text",
             "hit_count": "integer not null default 0",
             "updated_at": "text",
+            "example": "text",
         }
         for column, definition in hotword_migrations.items():
             if column not in hotword_cols:
