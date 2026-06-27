@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HotwordCandidates } from "./HotwordCandidates";
 import {
   createHotword,
   deleteHotword,
@@ -28,6 +29,7 @@ export function Hotwords() {
   const [protectedOnly, setProtectedOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [tab, setTab] = useState<"active" | "candidates">("active");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 新增热词表单
@@ -140,6 +142,36 @@ export function Hotwords() {
       {error && <Diag code="HW_E_ACTION">{error}</Diag>}
       {info && <Diag code="HW_OK" tone="info">{info}</Diag>}
 
+      {/* tab 切换 */}
+      <div style={{ display: "flex", gap: "var(--space-1)", marginBottom: "var(--space-4)", borderBottom: "1px solid var(--border-default)" }}>
+        <button
+          onClick={() => setTab("active")}
+          style={{
+            padding: "var(--space-2) var(--space-4)", background: "none", border: "none", cursor: "pointer",
+            fontWeight: tab === "active" ? "var(--weight-semibold)" : "var(--weight-regular)",
+            color: tab === "active" ? "var(--fg-default)" : "var(--fg-subtle)",
+            borderBottom: tab === "active" ? "2px solid var(--accent-default)" : "2px solid transparent",
+          }}
+        >
+          正式热词
+        </button>
+        <button
+          onClick={() => setTab("candidates")}
+          style={{
+            padding: "var(--space-2) var(--space-4)", background: "none", border: "none", cursor: "pointer",
+            fontWeight: tab === "candidates" ? "var(--weight-semibold)" : "var(--weight-regular)",
+            color: tab === "candidates" ? "var(--fg-default)" : "var(--fg-subtle)",
+            borderBottom: tab === "candidates" ? "2px solid var(--accent-default)" : "2px solid transparent",
+          }}
+        >
+          候选审阅
+        </button>
+      </div>
+
+      {tab === "candidates" && <HotwordCandidates />}
+
+      {tab === "active" && (
+      <>
       {/* 新增热词 */}
       <div
         style={{
@@ -337,6 +369,8 @@ export function Hotwords() {
         <div className="list-footer">
           <span className="count">共 {rows.data.length} 条（最多展示 1000 条）</span>
         </div>
+      )}
+      </>
       )}
     </div>
   );

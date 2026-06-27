@@ -1,6 +1,7 @@
 import { api, getStoredToken } from "./client";
 import type {
   Hotword,
+  HotwordCandidate,
   HotwordStatus,
   LoginResponse,
   Recording,
@@ -300,4 +301,24 @@ export function exportEmotionUrl(id: string): string {
 
 export function segmentAudioUrl(recordingId: string, segmentId: string): string {
   return withToken(`${apiPrefix()}/recordings/${recordingId}/segments/${segmentId}/audio`);
+}
+
+// -------- hotword candidates --------
+
+export async function fetchCandidates(sort?: string): Promise<HotwordCandidate[]> {
+  const { data } = await api.get<HotwordCandidate[]>("/hotwords/candidates", { params: sort ? { sort } : {} });
+  return data;
+}
+
+export async function confirmCandidates(
+  ids: string[],
+  edits?: Record<string, { word?: string; kind?: string }>,
+): Promise<{ confirmed: number }> {
+  const { data } = await api.post("/hotwords/candidates/confirm", { ids, edits: edits || {} });
+  return data;
+}
+
+export async function discardCandidates(ids: string[]): Promise<{ discarded: number }> {
+  const { data } = await api.post("/hotwords/candidates/discard", { ids });
+  return data;
 }

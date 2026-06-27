@@ -314,6 +314,18 @@ export interface RecordingDetail {
   hotword_package: HotwordPackage | null;
 }
 
+export interface HotwordCandidate {
+  id: string;
+  word: string;
+  kind: string;
+  confidence: number;
+  frequency: number;
+  example: string | null;
+  source: string;
+  state: string;
+  last_seen_at: string;
+}
+
 export interface Settings {
   llm_configured: boolean;
   llm_api_base: string;
