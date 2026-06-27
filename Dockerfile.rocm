@@ -1,0 +1,41 @@
+# ROCm 版（AMD GPU，gfx1151/Radeon 8060S 等 Navi/RDNA 架构）。
+# 基镜像复用宿主已有的 rocm/vllm-dev:navi 变体——ROCm 7.1 + PyTorch 2.8
+# + navi 构建（原生支持消费级 Navi/RDNA 显卡，gfx1151 在列）。
+# 用本地镜像 = 零下载；navi 变体避免 "no kernel image" 问题。
+FROM rocm/vllm-dev:rocm7.1_navi_ubuntu24.04_py3.12_pytorch_2.8_vllm_0.10.2rc1
+
+# 基镜像已有 torch 2.8 + ROCm runtime + conda python 3.12。补 ffmpeg + 音频依赖。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libsndfile1 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 装应用 ASR 依赖（funasr/modelscope/librosa 等）。
+# 关键：必须排除 torch/torchaudio——requirements-asr 里 pin 了 torch==2.12，
+# pip 会从 PyPI 拉 CUDA 版覆盖基镜像的 ROCm torch，导致 GPU 失效。
+# 基镜像已提供 ROCm 版 torch，这里只装其余依赖。
+COPY backend/requirements.txt backend/requirements-asr.txt ./backend/
+RUN grep -ivE "^(torch|torchaudio|torchvision)==" backend/requirements-asr.txt > /tmp/asr-deps.txt && \
+    pip install --no-cache-dir --no-deps -r /tmp/asr-deps.txt && \
+    pip install --no-cache-dir -r backend/requirements.txt
+
+COPY backend/ ./backend/
+COPY frontend/dist/ ./frontend/dist/
+
+ENV PATH="/opt/conda/bin:$PATH" \
+    AHAMVOICE_HOST=0.0.0.0 \
+    AHAMVOICE_PORT=8765 \
+    AHAMVOICE_HOME=/data \
+    AHAMVOICE_MODELS_DIR=/models \
+    AHAMVOICE_ASR_DEVICE=cuda
+# FunASR/torch 用 "cuda" 字符串触发 GPU 路径；ROCm 的 HIP 后端响应 device="cuda"
+# （HIP cuda 兼容层）。已实测 torch.cuda.is_available()=True on Radeon 8060S。
+
+VOLUME ["/models", "/data"]
+EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')" || exit 1
+
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8765"]

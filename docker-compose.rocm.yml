@@ -1,0 +1,24 @@
+# ROCm override：docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d
+# 适用于 AMD GPU（gfx1151/Radeon 8060S 等）+ ROCm 7.x 宿主。
+# 覆盖默认 CPU 配置：换 rocm 镜像 + 透传 GPU 设备 + device=cuda。
+services:
+  ahamvoice:
+    build:
+      dockerfile: Dockerfile.rocm
+    image: aham-voice-web:rocm
+    environment:
+      - AHAMVOICE_ASR_DEVICE=cuda
+      # 若报 "no kernel image available" 取消下行注释：
+      # - HSA_OVERRIDE_GFX_VERSION=11.0.0
+    # ROCm GPU 透传（/dev/kfd + /dev/dri）。容器内进程要在 render 组才能访问。
+    device_cgroup_rules:
+      - "c 226:* rmw"
+      - "c 511:* rmw"
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - "990"   # 宿主 render 组 gid（让容器进程能访问 /dev/kfd/renderD128）
+      - "44"    # video 组 gid
+    # IPC 钅（ROCm 共享内存需要；不设可能 OOM 或hang）
+    ipc: host
