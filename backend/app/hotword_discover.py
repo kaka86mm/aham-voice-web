@@ -34,7 +34,12 @@ def _parse_llm_json(content: str) -> list[dict[str, Any]]:
 
 
 def _dedupe_against_db(candidates: list[dict[str, Any]], recording_id: str) -> list[dict[str, Any]]:
-    """过滤掉已在库的词（active/candidate/protected 跳过，discarded 跳过）+ 同批去重。"""
+    """过滤掉已在库的词（active/candidate/protected 跳过，discarded 跳过）+ 同批去重。
+
+    recording_id 当前不参与去重逻辑——热词是全局的（不分录音），同一词不管
+    从哪条录音发现都只保留一条。参数保留是为了和 _insert_candidates 签名一致
+    + 未来可能按录音维度追溯来源。
+    """
     from .db import db
     with db() as conn:
         existing = {
@@ -99,8 +104,9 @@ async def _llm_extract_terms(transcript: str, summary: str) -> list[dict[str, An
         async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
             content = await _deepseek_post_with_retry(client, f"{base}/chat/completions", api_key, payload)
         return _parse_llm_json(content)
-    except Exception:
-        return []  # LLM 失败不阻塞
+    except Exception as exc:
+        print(f"[hotword-discover] LLM 抽取失败（不阻塞）: {type(exc).__name__}: {exc}", flush=True)
+        return []
 
 
 def _insert_candidates(candidates: list[dict[str, Any]], recording_id: str) -> int:
@@ -119,6 +125,10 @@ def _insert_candidates(candidates: list[dict[str, Any]], recording_id: str) -> i
         for c in candidates:
             word = (c.get("word") or "").strip()
             if not word:
+                continue
+            source_key = f"llm-discover:{recording_id}:{word.lower()}"
+            # 防重复：同一录音 discover 两次时，source_key 已存在则跳过
+            if conn.execute("select 1 from hotwords where source_key = ?", (source_key,)).fetchone():
                 continue
             kind = c.get("kind") or "业务术语"
             confidence = float(c.get("confidence") or 0.5)
