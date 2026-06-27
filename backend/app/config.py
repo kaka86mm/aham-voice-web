@@ -63,9 +63,14 @@ CAMPLUS = MODELS / "speech_campplus_sv_zh-cn_16k-common"
 EMOTION = MODELS / "emotion2vec_plus_large"
 VOICEPRINTS = BASE / "voiceprints"
 BIN_DIR = Path(os.environ.get("AHAMVOICE_BIN_DIR") or (BASE / "bin"))
-FFMPEG = BIN_DIR / "ffmpeg"
-FFPROBE = BIN_DIR / "ffprobe"
 os.environ["PATH"] = f"{BIN_DIR}:{os.environ.get('PATH', '')}"
+# ffmpeg/ffprobe：优先 BIN_DIR（原 Mac 桌面版静态化），找不到则从系统 PATH 解析
+# （Docker 版 apt 装在 /usr/bin/ffmpeg）。
+import shutil as _shutil
+_bin_ffmpeg = BIN_DIR / "ffmpeg"
+_bin_ffprobe = BIN_DIR / "ffprobe"
+FFMPEG = _bin_ffmpeg if _bin_ffmpeg.exists() else Path(_shutil.which("ffmpeg") or "ffmpeg")
+FFPROBE = _bin_ffprobe if _bin_ffprobe.exists() else Path(_shutil.which("ffprobe") or "ffprobe")
 
 for path in [APP_DATA, RECORDINGS, EXPORTS, TMP, VOICEPRINTS]:
     path.mkdir(parents=True, exist_ok=True)
