@@ -1,9 +1,4 @@
-"""情绪分析：emotion2vec 声学层 + DeepSeek 语义层（双层对冲）。
-
-从 main.py 搬迁（Task 5d），逻辑不变。声学层 emotion2vec 逐段识别情绪，
-语义层 DeepSeek 结合带声学标注的转写做对话情绪分析。两个模型的弱点
-（emotion2vec 误报 / LLM 不懂语气）互相对冲。
-"""
+"""情绪分析：emotion2vec 声学层 + LLM 语义层。"""
 from __future__ import annotations
 
 import json
@@ -243,7 +238,8 @@ def generate_emotion_analysis(recording_id: str, user: dict[str, Any]) -> dict[s
         with db() as conn:
             update_task(conn, task_id, "failed", 100, str(exc))
             audit(conn, user, "emotion", f"对话情绪分析失败：{rec['title']}。")
-        raise HTTPException(status_code=500, detail=f"emotion analysis failed: {exc}") from exc
+        print(f"[error] emotion: {type(exc).__name__}: {exc}", flush=True)
+        raise HTTPException(status_code=500, detail="情绪分析失败，请查看日志") from exc
 
 
 

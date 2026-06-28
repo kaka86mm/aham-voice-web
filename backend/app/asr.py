@@ -1,10 +1,4 @@
-"""ASR 转写：FunASR 加载、语义段合并、transcribe_recording 枢纽。
-
-从 main.py 搬迁（Task 5f），逻辑不变。这是最后一个领域模块（枢纽）——
-单向依赖 hotwords(build_hotword_package) + voiceprint(match_speaker_profiles)。
-含 recover_queued_recordings（之前留 main.py 因依赖 process_recording_background，
-现在两者都在 asr.py，循环消除）。
-"""
+"""ASR 转写：FunASR 加载、语义段合并、transcribe_recording 枢纽。"""
 from __future__ import annotations
 
 import asyncio
@@ -448,7 +442,8 @@ def transcribe_recording(recording_id: str, user: dict[str, Any], segment_second
             )
             update_task(conn, task_id, "failed", 100, str(exc))
             audit(conn, user, "recording", f"录音转写失败：{rec['title']}。")
-        raise HTTPException(status_code=500, detail=f"transcription failed: {exc}") from exc
+        print(f"[error] transcription: {type(exc).__name__}: {exc}", flush=True)
+        raise HTTPException(status_code=500, detail="转写失败，请查看日志") from exc
 
 
 

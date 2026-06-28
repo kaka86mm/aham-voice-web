@@ -1,9 +1,4 @@
-"""热词系统：多维打分、双轨包、ASR 热词可说性过滤。
-
-从 main.py 搬迁（Task 5b），逻辑不变。这是原项目最花心思的子系统——
-多维 score ranking、ASR/correction 双轨包、口语可说性过滤（_FORMAL_ORG_MARKER
-排除"…有限公司"这类口语不会说的全称，防 seaco 误偏置）。
-"""
+"""热词系统：多维打分、双轨包、ASR 热词可说性过滤。"""
 from __future__ import annotations
 
 import json

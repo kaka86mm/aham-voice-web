@@ -1,8 +1,4 @@
-"""声纹：匹配、说话人合并、声纹样本管理。
-
-从 main.py 搬迁（Task 5c），逻辑不变。核心是 match_speaker_profiles——
-多采样打分（top-5 中位数）+ margin 判定 + 三档作用域，防 CAM++ 过度聚类误认。
-"""
+"""声纹：匹配、说话人合并、声纹样本管理。"""
 from __future__ import annotations
 
 import re

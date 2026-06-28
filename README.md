@@ -119,7 +119,7 @@ pip install -r backend/requirements.txt   # 轻量依赖（fastapi/uvicorn/doten
 AHAMVOICE_HOME=/tmp/aham-dev python -m uvicorn backend.app.main:app --port 8765 --reload
 
 # 前端（改 TS 热更新）
-cd frontend-src && npm install && npm run dev   # Vite 跑 5173，已配 /api 代理到 8765
+cd frontend-src && npm install && npm run dev   # Vite 跑 5174，已配 /api 代理到 8765
 ```
 
 测试：`pip install pytest httpx && python -m pytest backend/tests/`

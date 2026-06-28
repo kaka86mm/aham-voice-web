@@ -2,28 +2,17 @@ import axios, { AxiosError } from "axios";
 
 // Axios base URL.
 //
-// Production: frontend is served by frontend_static_server.py on :5173, and
-// the FastAPI backend is on :8000 on the same host. The static server can't
-// proxy, so we hit the backend directly via CORS (the backend whitelists
-// :5173 + private-net regex via CORSMiddleware).
-//
-// Dev: vite runs on :5174 and proxies /api → :8000, so relative `/api`
-// works.
-//
-// Anything else (reverse-proxy in front, single-origin deploy, etc.) falls
-// back to relative `/api` and assumes the proxy handles it.
+// Production: FastAPI serves frontend/dist + /api on the same origin (single-port),
+// so relative "/api" works. Dev: Vite runs on :5174 and proxies /api → backend,
+// also relative "/api". Either way we use relative "/api".
 function deriveBaseURL(): string {
-  if (typeof window === "undefined") return "/api";
-  const { protocol, hostname, port } = window.location;
-  if (port === "5174") return "/api";
-  if (port === "5173" || port === "") return `${protocol}//${hostname}:8000/api`;
   return "/api";
 }
 
 // Axios instance shared by every API call. The access gate (when
 // AHAMVOICE_ACCESS_PASSWORD is set) uses an httpOnly cookie set by
 // POST /api/auth/login, so withCredentials must be true for the browser to
-// send/receive that cookie cross-origin (CORS is locked to private-net origins).
+// send/receive that cookie.
 export const api = axios.create({
   baseURL: deriveBaseURL(),
   timeout: 180_000,

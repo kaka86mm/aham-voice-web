@@ -14,7 +14,6 @@ venvs/
 
 # ---------- Node / Vite ----------
 node_modules/
-frontend-src/dist/
 frontend-src/dist-ssr/
 .vite/
 *.tsbuildinfo

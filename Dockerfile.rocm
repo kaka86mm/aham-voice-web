@@ -6,11 +6,14 @@ ARG ROCM_BASE=cortibox-rocm-base:latest
 FROM ${ROCM_BASE}
 
 # 基镜像已有 torch + ROCm runtime。补 ffmpeg + 音频依赖。
-# 先换国内 apt 源（阿里云 jammy）+ pip 源，境外源在国内极慢。
-RUN sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && \
-    sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
-    pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
-    pip config set global.trusted-host mirrors.aliyun.com && \
+# 国内用户构建慢时可传 USE_CN_MIRROR=1 走阿里云源（--build-arg USE_CN_MIRROR=1）。
+ARG USE_CN_MIRROR=0
+RUN if [ "$USE_CN_MIRROR" = "1" ]; then \
+      sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true; \
+      sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true; \
+      pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/; \
+      pip config set global.trusted-host mirrors.aliyun.com; \
+    fi && \
     apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg libsndfile1 && \
     rm -rf /var/lib/apt/lists/*

@@ -1,11 +1,4 @@
-"""会议纪要：分块 map-reduce、会议类型模板、自然语言改写、导出。
-
-从 main.py 搬迁（Task 5e），逻辑不变。含 call_deepseek_summary/revision——
-它们调用本模块的模板函数（meeting_template 等），所以放这里而不是 deepseek.py，
-避免 deepseek↔summary 循环依赖。summary→deepseek(_post_with_retry) 单向。
-
-反行动项设计：prompt 反复禁止输出"行动项/待办/下一步"，专注信息沉淀。
-"""
+"""会议纪要：分块 map-reduce、模板、自然语言改写、导出。"""
 from __future__ import annotations
 
 import uuid
@@ -328,7 +321,8 @@ async def summarize_recording(recording_id: str, user: dict[str, Any]) -> dict[s
             )
             update_task(conn, task_id, "failed", 100, str(exc))
             audit(conn, user, "summary", f"DeepSeek 调用失败：{rec['title']}。")
-        raise HTTPException(status_code=500, detail=f"summary generation failed: {exc}") from exc
+        print(f"[error] summary: {type(exc).__name__}: {exc}", flush=True)
+        raise HTTPException(status_code=500, detail="纪要生成失败，请查看日志") from exc
 
 
 
@@ -386,7 +380,8 @@ async def revise_summary(recording_id: str, instruction: str, user: dict[str, An
             )
             update_task(conn, task_id, "failed", 100, str(exc))
             audit(conn, user, "summary", f"自然语言修改纪要失败：{rec['title']}。")
-        raise HTTPException(status_code=500, detail=f"summary revision failed: {exc}") from exc
+        print(f"[error] revision: {type(exc).__name__}: {exc}", flush=True)
+        raise HTTPException(status_code=500, detail="纪要改写失败，请查看日志") from exc
 
 
 

@@ -1,7 +1,4 @@
-"""热词智能发现：从转写+纪要用 LLM 抽取候选词，去重后入库。
-
-独立于 hotwords.py（纯本地打分/双轨包逻辑）——本模块是 LLM 调用 + 文本处理。
-"""
+"""热词智能发现：从转写+纪要用 LLM 抽取候选词，去重后入库。"""
 from __future__ import annotations
 
 import json

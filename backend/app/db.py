@@ -1,14 +1,4 @@
-"""数据库层：连接、schema、迁移、中断恢复、task helper、cleanup。
-
-从 main.py 搬迁（Task 4），逻辑不变。这些是纯 DB 操作或与 DB 紧耦合的
-helper（如 ensure_schema 的迁移、task_payload 的时间计算）。
-
-注意：
-- recover_queued_recordings 留在 main.py（依赖 process_recording_background，
-  避免 db -> asr 循环依赖；后续 asr.py 会一并接管）。
-- normalize_profile 留在 main.py（声纹用，Task 5c 搬到 voiceprint.py）。
-- audit() 是 no-op（audit 表在 Task 2 删除），保留 signature 兼容调用点。
-"""
+"""数据库层：连接、schema、迁移、中断恢复、task helper、cleanup。"""
 from __future__ import annotations
 
 import json
