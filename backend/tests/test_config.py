@@ -26,7 +26,7 @@ def test_deepseek_config_defaults(tmp_home, monkeypatch):
     key, base, model = config.get_deepseek_config()
     assert key == ""
     assert base == "https://api.deepseek.com"
-    assert model == "deepseek-v4-pro"
+    assert model == "deepseek-chat"
 
 
 def test_save_user_config_roundtrip(tmp_home, monkeypatch):

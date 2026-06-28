@@ -132,7 +132,7 @@ def get_llm_config() -> tuple[str, str, str]:
         or os.environ.get("DEEPSEEK_MODEL")
         or cfg.get("llm_model")
         or cfg.get("deepseek_model")
-        or "deepseek-v4-pro"
+        or "deepseek-chat"
     ).strip()
     return api_key, base, model
 
