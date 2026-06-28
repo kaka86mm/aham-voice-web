@@ -19,7 +19,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { readApiError } from "@/api/client";
 import { formatRelative } from "@/utils/format";
 
-const STATES = ["全部", "active", "expired", "protected"] as const;
+const STATES = ["全部", "active", "discarded", "expired", "protected"] as const;
 
 export function Hotwords() {
   const qc = useQueryClient();
@@ -347,6 +347,21 @@ export function Hotwords() {
                       }
                     >
                       {row.protected ? "取消保护" : "标为保护"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        togglePatch.mutate({
+                          id: row.id,
+                          payload: {
+                            state: row.state === "discarded" ? "active" : "discarded",
+                            active: row.state === "discarded" ? true : false,
+                          },
+                        })
+                      }
+                    >
+                      {row.state === "discarded" ? "启用" : "停用"}
                     </Button>
                     <Button
                       variant="ghost"
