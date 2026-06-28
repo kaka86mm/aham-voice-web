@@ -890,7 +890,7 @@ def voiceprints(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, 
             normalize_profile(row)
             for row in rowsdict(
                 conn.execute(
-                    "select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles order by created_at desc",
+                    "select id,name,note,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles order by created_at desc",
                 ).fetchall()
             )
         ]
@@ -975,14 +975,14 @@ def create_voiceprint(
     with db() as conn:
         conn.execute(
             """
-            insert into speaker_profiles(id,name,owner_id,team_id,sample_path,threshold,active,created_at)
-            values(?,?,?,?,?,?,1,?)
+            insert into speaker_profiles(id,name,note,owner_id,team_id,sample_path,threshold,active,created_at)
+            values(?,?,?,?,?,?,?,1,?)
             """,
-            (profile_id, name.strip(), user["id"], profile_team_id, str(target), profile_threshold, now()),
+            (profile_id, name.strip(), None, user["id"], profile_team_id, str(target), profile_threshold, now()),
         )
         conn.execute("update speaker_profiles set scope = ? where id = ?", (requested_scope, profile_id))
         audit(conn, user, "voiceprint.create", f"{user['name']} 登记{requested_scope}声纹样本：{name.strip()}。")
-        row = rowdict(conn.execute("select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?", (profile_id,)).fetchone())
+        row = rowdict(conn.execute("select id,name,note,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?", (profile_id,)).fetchone())
     return normalize_profile(row)
 
 
@@ -997,6 +997,7 @@ def create_voiceprint_from_recording(payload: dict[str, Any], user: dict[str, An
     profile_id = str(payload.get("profile_id") or "").strip()
     update_current = bool(payload.get("update_current_recording", True))
     threshold = clamp_voiceprint_threshold(payload.get("threshold"))
+    note = str(payload.get("note") or "").strip() or None
 
     with db() as conn:
         rec = can_access_recording(conn, recording_id, user)
@@ -1065,16 +1066,16 @@ def create_voiceprint_from_recording(payload: dict[str, Any], user: dict[str, An
     with db() as conn:
         if existing_profile:
             conn.execute(
-                "update speaker_profiles set sample_path = ?, threshold = ? where id = ?",
-                (str(target), threshold, final_profile_id),
+                "update speaker_profiles set sample_path = ?, threshold = ?, note = ? where id = ?",
+                (str(target), threshold, note, final_profile_id),
             )
         else:
             conn.execute(
                 """
-                insert into speaker_profiles(id,name,owner_id,team_id,scope,sample_path,threshold,active,created_at)
-                values(?,?,?,?,?,?,?,1,?)
+                insert into speaker_profiles(id,name,note,owner_id,team_id,scope,sample_path,threshold,active,created_at)
+                values(?,?,?,?,?,?,?,?,1,?)
                 """,
-                (final_profile_id, name, user["id"], profile_team_id, requested_scope, str(target), threshold, now()),
+                (final_profile_id, name, note, user["id"], profile_team_id, requested_scope, str(target), threshold, now()),
             )
         conn.executemany(
             """
@@ -1117,7 +1118,7 @@ def create_voiceprint_from_recording(payload: dict[str, Any], user: dict[str, An
         )
         profile = rowdict(
             conn.execute(
-                "select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?",
+                "select id,name,note,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?",
                 (final_profile_id,),
             ).fetchone()
         )
@@ -1210,6 +1211,9 @@ def patch_voiceprint(profile_id: str, payload: dict[str, Any], user: dict[str, A
         updates: dict[str, Any] = {}
         if "name" in payload:
             updates["name"] = str(payload["name"]).strip()
+        if "note" in payload:
+            note_val = payload["note"]
+            updates["note"] = str(note_val).strip() if note_val is not None else None
         if "threshold" in payload:
             updates["threshold"] = clamp_voiceprint_threshold(payload["threshold"])
         if "active" in payload:
@@ -1219,8 +1223,32 @@ def patch_voiceprint(profile_id: str, payload: dict[str, Any], user: dict[str, A
         assignments = ", ".join(f"{key} = ?" for key in updates)
         conn.execute(f"update speaker_profiles set {assignments} where id = ?", (*updates.values(), profile_id))
         audit(conn, user, "voiceprint.update", f"{user['name']} 修改声纹样本：{profile['name']}。")
-        changed = rowdict(conn.execute("select id,name,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?", (profile_id,)).fetchone())
+        changed = rowdict(conn.execute("select id,name,note,owner_id,team_id,scope,threshold,active,created_at from speaker_profiles where id = ?", (profile_id,)).fetchone())
     return normalize_profile(changed)
+
+
+@app.delete("/api/voiceprints/{profile_id}")
+def delete_voiceprint(profile_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """硬删除声纹：删 profile 行 + 级联 sample 行 + 删音频文件 + 置空引用它的
+    transcript_segments.voiceprint_id（保留 speaker_name 文本，转写标签不丢）。"""
+    with db() as conn:
+        profile = rowdict(conn.execute("select * from speaker_profiles where id = ?", (profile_id,)).fetchone())
+        if not profile:
+            raise HTTPException(status_code=404, detail="voiceprint not found")
+        profile = normalize_profile(profile)
+        if not can_manage_voiceprint(profile, user):
+            raise HTTPException(status_code=403, detail="voiceprint is outside current permission scope")
+        sample_path = str(profile.get("sample_path") or "").strip()
+        conn.execute("update transcript_segments set voiceprint_id = null where voiceprint_id = ?", (profile_id,))
+        conn.execute("delete from speaker_samples where profile_id = ?", (profile_id,))
+        conn.execute("delete from speaker_profiles where id = ?", (profile_id,))
+        audit(conn, user, "voiceprint.delete", f"{user['name']} 删除声纹样本：{profile['name']}。")
+    if sample_path:
+        try:
+            Path(sample_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return {"ok": True, "id": profile_id}
 
 
 @app.get("/api/system/status")

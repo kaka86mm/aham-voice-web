@@ -120,6 +120,7 @@ def ensure_schema() -> None:
                 duration_label text not null,
                 asr_status text not null default 'pending',
                 summary_status text not null default 'pending',
+                speaker_count integer,
                 crm_sync_status text not null default 'pending',
                 crm_sync_error text,
                 crm_synced_at text,
@@ -249,6 +250,7 @@ def ensure_schema() -> None:
             create table if not exists speaker_profiles (
                 id text primary key,
                 name text not null,
+                note text,
                 owner_id text,
                 team_id text,
                 scope text not null default 'team',
@@ -288,6 +290,7 @@ def ensure_schema() -> None:
             "crm_relation_target_name": "text",
             "crm_sync_response": "text not null default '{}'",
             "expected_speakers": "integer",
+            "speaker_count": "integer",
         }
         for column, definition in recording_migrations.items():
             if column not in recording_cols:
@@ -413,6 +416,8 @@ def ensure_schema() -> None:
         if "scope" not in profile_cols:
             conn.execute("alter table speaker_profiles add column scope text not null default 'team'")
             conn.execute("update speaker_profiles set scope = case when team_id is null then 'global' else 'team' end")
+        if "note" not in profile_cols:
+            conn.execute("alter table speaker_profiles add column note text")
         if not conn.execute("select 1 from hotwords limit 1").fetchone():
             seed_hotwords = [
                 ("AhamVoice", "产品", "aham voice,aham", "系统内置", "部门共享", 10, 1),
@@ -583,6 +588,18 @@ def recording_payload(conn: sqlite3.Connection, rec: dict[str, Any]) -> dict[str
     # No users table — owner_name is fixed (every recording belongs to local-admin).
     payload = dict(rec)
     payload["owner_name"] = _LOCAL_USER["name"]
+    # speaker_count: prefer live count over distinct speakers in transcript
+    # (historical recordings without stored column still report correctly),
+    # falling back to stored value when no segments exist yet.
+    distinct = conn.execute(
+        "select count(distinct coalesce(speaker_name, speaker)) from transcript_segments where recording_id = ?",
+        (rec["id"],),
+    ).fetchone()[0]
+    if distinct:
+        payload["speaker_count"] = int(distinct)
+    else:
+        stored = rec.get("speaker_count")
+        payload["speaker_count"] = int(stored) if stored is not None else None
     return payload
 
 
