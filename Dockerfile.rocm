@@ -26,7 +26,8 @@ WORKDIR /app
 # 先钉住 torch，但当前 funasr 1.3.14 的 torch 需求被基镜像 2.9 满足）。
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt && \
-    pip install --no-cache-dir funasr modelscope librosa soundfile scipy scikit-learn
+    pip install --no-cache-dir funasr modelscope librosa soundfile scipy scikit-learn && \
+    pip install --no-cache-dir addict datasets simplejson
 
 COPY backend/ ./backend/
 COPY frontend/dist/ ./frontend/dist/
