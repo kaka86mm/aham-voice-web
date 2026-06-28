@@ -29,6 +29,24 @@
 
 **Aham Voice Web** 把整条链路在你的服务器上接完整——转写、说话人分离、声学情绪全部本地离线 GPU 加速，只有纪要才交给你的大模型，音频和数据不离开你的机器。
 
+### 与原版的区别
+
+本项目 fork 自 [aham-voice](https://github.com/li599198347-svg/aham-voice)（macOS 桌面应用，MIT），核心转写/声纹/纪要/情绪管线原样保留，**重做了形态、平台、扩展性和工程结构**：
+
+| 维度 | 原版 aham-voice | 本项目 aham-voice-web |
+|---|---|---|
+| 🖥️ **形态** | macOS 桌面 app（pywebview 打包 `.app`） | **Web 应用**，浏览器访问，手机/平板同 Wi-Fi 可用 |
+| 💻 **平台 / GPU** | 仅 macOS · MPS | **Linux + Windows** · CUDA / **ROCm（AMD）** / CPU 三档 |
+| 🤖 **大模型** | 硬编码 DeepSeek | **任意 OpenAI 兼容端点**（DeepSeek / 通义 / Kimi / Ollama / vLLM） |
+| 🏷️ **热词** | 仅手工录入 / txt 导入 | + **LLM 智能发现**：转写后自动抽取候选词 → 批量审阅确认 |
+| 🔐 **访问控制** | 多用户体系（users / sessions / teams / roles） | **单密码门**（删掉多用户死代码，局域网共享够用） |
+| 📦 **部署** | 手动打包 `.app` | **`docker compose up -d`** 一键起，含模型自动下载 |
+| 🧩 **代码结构** | 单文件 `main.py` 5000+ 行 | **拆成 13 个聚焦模块**（asr / hotwords / voiceprint / summary / emotion …） |
+| 🧪 **测试** | 无 | **pytest + 单测**（config / security / 热词发现 / 模型下载） |
+| 🩺 **健壮性** | — | 中断任务自动恢复、ffmpeg 路径 fallback、错误信息脱敏 |
+
+> Mac 用户建议直接用[原项目](https://github.com/li599198347-svg/aham-voice)（原生 MPS 加速，体验更顺）。本项目面向 **Linux / Windows 服务器**。
+
 ### 核心特性
 
 | 特性 | 说明 |
@@ -140,6 +158,24 @@ python -m pytest backend/tests/ -v
 Most transcription tools are cloud services: you upload audio to someone else's server, and get back unstructured plain text without speaker labels. Local tools usually stop at "here's some text."
 
 **Aham Voice Web** completes the entire pipeline on your own server — transcription, speaker diarization, and acoustic emotion all run locally with GPU acceleration. Only the meeting summary goes to your LLM. Audio and data never leave your machine.
+
+### What's different from the original
+
+This project is forked from [aham-voice](https://github.com/li599198347-svg/aham-voice) (a macOS desktop app, MIT). The core transcription / voiceprint / summary / emotion pipeline is preserved as-is — **what we rebuilt is the form, platform, extensibility, and engineering structure**:
+
+| Dimension | Original aham-voice | This project aham-voice-web |
+|---|---|---|
+| 🖥️ **Form** | macOS desktop app (pywebview, packaged `.app`) | **Web app** — browser access, phone/tablet on same Wi-Fi |
+| 💻 **Platform / GPU** | macOS only · MPS | **Linux + Windows** · CUDA / **ROCm (AMD)** / CPU |
+| 🤖 **LLM** | Hard-coded DeepSeek | **Any OpenAI-compatible endpoint** (DeepSeek / Qwen / Kimi / Ollama / vLLM) |
+| 🏷️ **Hotwords** | Manual entry / txt import only | + **Smart LLM discovery**: auto-extract candidates post-transcription → batch review |
+| 🔐 **Access control** | Multi-user system (users / sessions / teams / roles) | **Single password gate** (removed multi-user dead code, enough for LAN sharing) |
+| 📦 **Deployment** | Manual `.app` packaging | **`docker compose up -d`** one-command, with auto model download |
+| 🧩 **Code structure** | Single `main.py` 5000+ lines | **Split into 13 focused modules** (asr / hotwords / voiceprint / summary / emotion …) |
+| 🧪 **Tests** | None | **pytest + unit tests** (config / security / hotword discovery / model download) |
+| 🩺 **Robustness** | — | Interrupted-task auto-recovery, ffmpeg PATH fallback, sanitized error messages |
+
+> Mac users should use the [original project](https://github.com/li599198347-svg/aham-voice) directly (native MPS acceleration, smoother experience). This project targets **Linux / Windows servers**.
 
 ### Key Features
 
