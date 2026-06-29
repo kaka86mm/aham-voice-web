@@ -101,7 +101,9 @@ export function RecordingDetail() {
   // 由 RecordingCard 绑定到 <audio>，Preview 通过 onSeekToTime 调用。
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  /** 纪要时间戳点击回调：seek 左侧播放器到指定秒数并播放。 */
+  /** 纪要时间戳点击回调：seek 左侧播放器到指定秒数并播放，
+   *  同时自动滚动让播放器进入视野——这样用户点一下就完成全部操作，
+   *  不用手动滚回顶部找播放器。 */
   const handleSeekToTime = useCallback((seconds: number) => {
     const el = audioRef.current;
     if (!el) return;
@@ -109,6 +111,9 @@ export function RecordingDetail() {
     el.play().catch(() => {
       // 自动播放被浏览器拦截（用户还没交互过）——静默忽略，用户可手动点播放。
     });
+    // 平滑滚动让播放器居中可见。只滚左栏（detail-main__scroll），
+    // 右栏纪要不动——正是我们要的。
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
   const summaries = detail.data?.summaries ?? [];
