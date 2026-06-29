@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 # 纠错窗口：把相邻 N 段合并成一个纠询单元，给 LLM 足够上下文。
 # 太短→LLM 缺上下文；太长→延迟高、易截断。8 段约 1000-2000 字，合适。
 CORRECTION_WINDOW = 8
+# 整体超时上限：纠错总耗时不超过这么久。超时则剩余窗口保留原文。
+# 避免长录音（多窗口）把转写线程卡住太久。
+MAX_TOTAL_SECONDS = 180
+# 连续失败这么多次后放弃剩余窗口（如 model 不支持长文本返回空）。
+MAX_CONSECUTIVE_FAILURES = 3
 
 
 SYSTEM_PROMPT = (
@@ -65,8 +70,28 @@ def correct_dialect_segments(
 
     corrected_segments = [dict(s) for s in segments]  # 浅拷贝，不污染原数据
 
+    import time
+    start_time = time.time()
+    consecutive_failures = 0
+
     # 按窗口切分
     for window_start in range(0, len(segments), CORRECTION_WINDOW):
+        # 整体超时检查
+        if time.time() - start_time > MAX_TOTAL_SECONDS:
+            logger.warning(
+                "dialect correction total timeout (%.0fs), %d windows skipped",
+                time.time() - start_time,
+                (len(segments) - window_start + CORRECTION_WINDOW - 1) // CORRECTION_WINDOW,
+            )
+            break
+        # 连续失败太多，放弃剩余
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            logger.warning(
+                "dialect correction aborted: %d consecutive failures (model may not support long text)",
+                consecutive_failures,
+            )
+            break
+
         window = segments[window_start : window_start + CORRECTION_WINDOW]
         window_lines = [
             f"[说话人{s.get('speaker', '?')}] {s.get('text', '')}" for s in window
@@ -82,11 +107,14 @@ def correct_dialect_segments(
                 idx = window_start + i
                 if i < len(corrected_lines):
                     corrected_segments[idx]["text"] = corrected_lines[i]
+            consecutive_failures = 0  # 成功，重置失败计数
         except Exception as exc:
+            consecutive_failures += 1
             logger.warning(
-                "dialect correction failed for window %d-%d: %s: %s",
+                "dialect correction failed for window %d-%d (failure #%d): %s: %s",
                 window_start,
                 window_start + len(window),
+                consecutive_failures,
                 type(exc).__name__,
                 exc,
             )
@@ -102,6 +130,9 @@ def _call_llm_correction(
     """调 LLM 纠错，返回纠正后的文本。
 
     用户消息只放转写原文，指令全在 system prompt（稳定输出格式）。
+    timeout=30s（不是 120）：长录音有多个窗口，单窗口卡太久会拖垮整个转写。
+    若 LLM 对长文本返回空（deepseek-v4-pro 的已知问题），立即抛异常，
+    由上层按窗口跳过，不要等满超时。
     """
     payload = {
         "model": model,
@@ -112,7 +143,7 @@ def _call_llm_correction(
             {"role": "user", "content": transcript_text},
         ],
     }
-    with httpx.Client(timeout=120, trust_env=False) as client:
+    with httpx.Client(timeout=30, trust_env=False) as client:
         r = client.post(
             f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},

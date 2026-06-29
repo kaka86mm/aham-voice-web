@@ -143,3 +143,48 @@ def test_partial_window_failure_preserves_rest():
     # 注意：3 段 < 窗口 8，只调一次。改成测多窗口场景
     # 这里验证失败时保留原文
     assert len(result) == 3
+
+
+def test_consecutive_failures_aborts_remaining():
+    """连续 3 次窗口失败后放弃剩余窗口（防 model 不支持长文本卡死）。"""
+    # 造 40 段 → 5 个窗口，全部失败 → 第 3 次后放弃
+    segs = _make_segments([f"段{i}" for i in range(40)])
+    call_count = {"n": 0}
+
+    def mock_call(api_key, base, model, text):
+        call_count["n"] += 1
+        raise RuntimeError("model 返回空")
+
+    with patch("backend.app.dialect_correction.get_llm_config", return_value=("key", "base", "model")), \
+         patch("backend.app.dialect_correction._call_llm_correction", side_effect=mock_call):
+        result = correct_dialect_segments(segs)
+
+    # 连续失败 3 次后放弃，不会调满 5 个窗口
+    assert call_count["n"] == 3
+    # 全部保留原文
+    assert all(s["text"].startswith("段") for s in result)
+    assert len(result) == 40
+
+
+def test_total_timeout_skips_remaining(monkeypatch):
+    """整体超时后剩余窗口保留原文（不会跑完全部窗口）。"""
+    import backend.app.dialect_correction as mod
+    monkeypatch.setattr(mod, "MAX_TOTAL_SECONDS", 0)  # 立即超时
+
+    # 造足够多段，确保有多个窗口
+    segs = _make_segments([f"段{i}" for i in range(40)])  # 5 个窗口
+    call_count = {"n": 0}
+
+    def mock_call(api_key, base, model, text):
+        call_count["n"] += 1
+        return "[说话人0] 纠正"
+
+    with patch("backend.app.dialect_correction.get_llm_config", return_value=("key", "base", "model")), \
+         patch("backend.app.dialect_correction._call_llm_correction", side_effect=mock_call):
+        result = correct_dialect_segments(segs)
+
+    # 超时后大部分窗口被跳过，不会跑满 5 个
+    assert call_count["n"] < 5
+    # 未跑的窗口保留原文
+    original_count = sum(1 for s in result if s["text"].startswith("段"))
+    assert original_count > 0
