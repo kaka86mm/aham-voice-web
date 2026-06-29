@@ -3,10 +3,17 @@
 启用条件：AHAMVOICE_ACCESS_PASSWORD 非空。
 token 存内存（进程级 set），重启失效，不设过期。
 
+API Token（供 Hermes/脚本等非浏览器客户端）：
+- AHAMVOICE_API_TOKEN 环境变量配置固定 token，启动时注入 self._tokens
+- 客户端用 Authorization: Bearer <token> 或 ?token=<token> 调用
+- 与登录 cookie token 同集合，is_authorized 统一校验，重启不失效
+
 设计取舍：
 - Cookie 而非 Authorization Header：浏览器原生支持，前端 fetch 加
   credentials:'include' 即可，手机浏览器兼容好。
+- API Token 走 Bearer/query：curl/脚本无 cookie 容器，给固定 token 最省事。
 - token 存内存不存 DB：重启重新登录可接受；存 DB 要加表（与删多用户表冲突）。
+  固定 API Token 是 env 配置，重启自动恢复，不依赖 DB。
 - 密码明文比对（hmac.compare_digest 防时序攻击）：单密码门不是用户密码库，
   密码在 .env 也是明文，哈希只是表演。
 - 不设过期：单机自用，登录一次一直有效。重置靠重启或改密码。
@@ -33,12 +40,21 @@ WHITELIST_EXACT = ("/", "/favicon.svg", "/favicon.ico", "/index.html", "/login")
 
 
 class Security:
-    """密码门状态：密码 + 已发放的 token 集合（进程级内存）。"""
+    """密码门状态：密码 + 已发放的 token 集合（进程级内存）。
 
-    def __init__(self, password: str | None) -> None:
+    token 来源有两种，都进同一个 self._tokens 集合：
+    - 登录动态生成（cookie 用，重启失效）
+    - AHAMVOICE_API_TOKEN 配置的固定 token（API/程序调用用，重启不失效）
+    """
+
+    def __init__(self, password: str | None, api_token: str | None = None) -> None:
         self.enabled = bool(password)
         self._password = password or ""
         self._tokens: set[str] = set()
+        # 固定 API Token：供 Hermes/脚本等非浏览器客户端用 Bearer 调用。
+        # 与登录 token 同集合，is_authorized 统一校验。
+        if api_token:
+            self._tokens.add(api_token)
 
     def login(self, creds: dict[str, Any]) -> JSONResponse:
         if not self.enabled:
@@ -58,8 +74,20 @@ class Security:
         path = request.url.path
         if path in WHITELIST_EXACT or any(path.startswith(p) for p in WHITELIST_PREFIXES):
             return True
+        # 通道 1：浏览器 cookie（原有逻辑，浏览器用户继续用）
         token = request.cookies.get(COOKIE_NAME)
-        return token in self._tokens
+        if token in self._tokens:
+            return True
+        # 通道 2：Authorization: Bearer <token>（Hermes/curl 等非浏览器客户端）
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            if auth_header[7:].strip() in self._tokens:
+                return True
+        # 通道 3：?token=<token> query（前端媒体 URL withToken 已在发）
+        query_token = request.query_params.get("token")
+        if query_token and query_token in self._tokens:
+            return True
+        return False
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -76,5 +104,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
 
 def build_security() -> Security:
-    """从 env 读密码构造 Security。空密码 → 不启用。"""
-    return Security(password=os.environ.get("AHAMVOICE_ACCESS_PASSWORD") or None)
+    """从 env 读密码和可选的固定 API Token 构造 Security。
+
+    - AHAMVOICE_ACCESS_PASSWORD：空 → 密码门不启用
+    - AHAMVOICE_API_TOKEN：非空则作为固定 long-lived token 注入，
+      供 Hermes/脚本等用 Bearer 调 API（重启不失效，配置驱动）。
+    """
+    return Security(
+        password=os.environ.get("AHAMVOICE_ACCESS_PASSWORD") or None,
+        api_token=os.environ.get("AHAMVOICE_API_TOKEN") or None,
+    )

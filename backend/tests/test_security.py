@@ -91,3 +91,88 @@ def test_wrong_password_repeated_no_lockout(tmp_home):
     with TestClient(app) as c:
         for _ in range(10):
             assert c.post("/api/auth/login", json={"password": "wrong"}).status_code == 401
+
+
+# -------- API Token（Bearer / query）通道 --------
+
+def make_app_with_api_token(password, api_token):
+    """构造带密码门 + 固定 API Token 的测试 app。"""
+    app = FastAPI()
+    sec = sec_mod.Security(password=password, api_token=api_token)
+    app.add_middleware(sec_mod.SecurityMiddleware, security=sec)
+
+    @app.get("/api/health")
+    def _health():
+        return {"ok": True}
+
+    @app.get("/api/me")
+    def _me():
+        return {"id": "local-admin"}
+
+    return app, sec
+
+
+def test_bearer_token_authorizes(tmp_home):
+    """固定 API Token + Authorization: Bearer → 通过。"""
+    app, _ = make_app_with_api_token(password="secret", api_token="sk-hermes-xyz")
+    with TestClient(app) as c:
+        r = c.get("/api/me", headers={"Authorization": "Bearer sk-hermes-xyz"})
+        assert r.status_code == 200
+
+
+def test_bearer_token_wrong_rejected(tmp_home):
+    """错误的 Bearer token → 401。"""
+    app, _ = make_app_with_api_token(password="secret", api_token="sk-hermes-xyz")
+    with TestClient(app) as c:
+        r = c.get("/api/me", headers={"Authorization": "Bearer wrong-token"})
+        assert r.status_code == 401
+
+
+def test_query_token_authorizes(tmp_home):
+    """固定 API Token + ?token= → 通过（前端媒体 URL 用）。"""
+    app, _ = make_app_with_api_token(password="secret", api_token="sk-hermes-xyz")
+    with TestClient(app) as c:
+        r = c.get("/api/me?token=sk-hermes-xyz")
+        assert r.status_code == 200
+
+
+def test_api_token_and_cookie_coexist(tmp_home):
+    """API Token 和登录 cookie 共存：两种方式都能访问。"""
+    app, sec = make_app_with_api_token(password="secret", api_token="sk-hermes-xyz")
+
+    @app.post("/api/auth/login")
+    def _login(creds: dict):
+        return sec.login(creds)
+
+    with TestClient(app) as c:
+        # Bearer 方式
+        assert c.get("/api/me", headers={"Authorization": "Bearer sk-hermes-xyz"}).status_code == 200
+        # 登录拿 cookie 方式
+        c.post("/api/auth/login", json={"password": "secret"})
+        assert c.get("/api/me").status_code == 200
+
+
+def test_bearer_prefix_case_insensitive(tmp_home):
+    """Bearer 前缀大小写不敏感（bearer/BEARER 都行）。"""
+    app, _ = make_app_with_api_token(password="secret", api_token="sk-hermes-xyz")
+    with TestClient(app) as c:
+        assert c.get("/api/me", headers={"Authorization": "bearer sk-hermes-xyz"}).status_code == 200
+        assert c.get("/api/me", headers={"Authorization": "BEARER sk-hermes-xyz"}).status_code == 200
+
+
+def test_build_security_reads_api_token_env(tmp_home, monkeypatch):
+    """build_security 从 AHAMVOICE_API_TOKEN 环境变量读固定 token。"""
+    monkeypatch.setenv("AHAMVOICE_ACCESS_PASSWORD", "secret")
+    monkeypatch.setenv("AHAMVOICE_API_TOKEN", "sk-from-env-123")
+    sec = sec_mod.build_security()
+    assert sec.enabled
+    assert "sk-from-env-123" in sec._tokens
+
+
+def test_build_security_no_api_token(tmp_home, monkeypatch):
+    """没配 AHAMVOICE_API_TOKEN → 只有登录能拿 token。"""
+    monkeypatch.setenv("AHAMVOICE_ACCESS_PASSWORD", "secret")
+    monkeypatch.delenv("AHAMVOICE_API_TOKEN", raising=False)
+    sec = sec_mod.build_security()
+    assert sec.enabled
+    assert len(sec._tokens) == 0  # 没有预置 token，只能靠登录生成
