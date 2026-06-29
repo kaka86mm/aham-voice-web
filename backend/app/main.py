@@ -621,11 +621,15 @@ def hotwords(
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with db() as conn:
-        where = ["1=1"]
+        where: list[str] = []
         args: list[Any] = []
         if state:
             where.append("coalesce(state, 'active') = ?")
             args.append(state)
+        else:
+            # 不传 state 时（"全部"tab），排除 candidate——候选词有专门的审阅页面，
+            # 不该混进正式热词表。之前这里没过滤导致候选词显示在正式库里。
+            where.append("(coalesce(state, 'active') != 'candidate')")
         if protected in {"0", "1"}:
             where.append("protected = ?")
             args.append(int(protected))

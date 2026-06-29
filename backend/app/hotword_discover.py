@@ -138,7 +138,7 @@ def _insert_candidates(candidates: list[dict[str, Any]], recording_id: str) -> i
                     first_seen_at, last_seen_at, last_used_at, updated_at
                 ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    str(uuid.uuid4()), word, kind, "llm-discover", "global", 5, 1, "candidate", 0,
+                    str(uuid.uuid4()), word, kind, "llm-discover", "global", 5, 0, "candidate", 0,
                     frequency, confidence, 0, example,
                     f"llm-discover:{recording_id}:{word.lower()}",
                     ts, ts, ts, ts,
