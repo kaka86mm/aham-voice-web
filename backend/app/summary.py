@@ -397,15 +397,16 @@ async def summarize_recording(recording_id: str, user: dict[str, Any]) -> dict[s
         text = transcript_text(conn, recording_id)
         if not text.strip():
             raise HTTPException(status_code=409, detail="transcript is empty")
-        # 纪要生成时用【当前最新热词库】重建 glossary，而非转写时的旧快照。
-        # 这样用户在热词库新增/确认词后，重新生成纪要就能用上（glossary 注入 LLM）。
+        # 纪要生成时刷新热词包：用当前最新热词库重新打包并持久化。
+        # 这样用户新增/确认热词后，重新生成纪要：glossary 用上新词 + RecordingCard
+        # 显示的热词数也更新。包是 append-only（新增 version），保留历史快照。
         from .hotwords import build_hotword_package
         from .state import _LOCAL_USER
         try:
-            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=False)
+            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=True)
             glossary_hint = glossary_prompt(fresh_pkg.get("glossary") or {})
         except Exception:
-            # 重建失败则回退到转写时的快照
+            # 重建失败则回退到最近一次快照（不阻塞纪要生成）
             package = latest_hotword_package(conn, recording_id)
             glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
         task_id = create_task(conn, recording_id, rec["title"], "云端纪要")
@@ -467,11 +468,12 @@ async def revise_summary(recording_id: str, instruction: str, user: dict[str, An
         if not base_summary:
             raise HTTPException(status_code=409, detail="summary is not ready")
         text = transcript_text(conn, recording_id)
-        # 修改纪要时同样用当前最新热词库重建 glossary（与 summarize_recording 一致）。
+        # 修改纪要时同样刷新热词包（与 summarize_recording 一致），保证
+        # glossary 和 RecordingCard 显示都用最新热词库。
         from .hotwords import build_hotword_package
         from .state import _LOCAL_USER
         try:
-            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=False)
+            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=True)
             glossary_hint = glossary_prompt(fresh_pkg.get("glossary") or {})
         except Exception:
             package = latest_hotword_package(conn, recording_id)
