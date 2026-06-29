@@ -32,6 +32,58 @@ def transcript_text(conn: sqlite3.Connection, recording_id: str) -> str:
 
 
 
+def split_transcript_into_chunks(text: str, chunk_chars: int) -> list[str]:
+    """按转写段边界（换行）切块，避免把一句话或说话人轮次劈成两半。
+
+    transcript_text 输出的是「每行一段」的转写，行间用 \\n 分隔。在行边界切
+    能保证每个 map 分块拿到的是若干完整发言段，话题和上下文不被硬切。
+
+    - 软上限 chunk_chars：累计到该长度后，在下一个换行处切（块会略超）。
+    - 硬上限 1.5x chunk_chars：单行超长时（极少见，如一段朗读极长的发言），
+      允许段内切，避免单块过大或死循环。
+    - chunk_chars 下限保护 500，防止误传过小值导致碎块。
+    """
+    if not text:
+        return []
+    chunk_chars = max(500, int(chunk_chars or 8000))
+    lines = text.split("\n")
+    if len(lines) <= 1:
+        # 单行或空：按硬上限兜底切（极长单段）
+        if len(text) <= chunk_chars:
+            return [text]
+        hard_limit = int(chunk_chars * 1.5)
+        return [text[i : i + hard_limit] for i in range(0, len(text), hard_limit)] or [text]
+
+    chunks: list[str] = []
+    current_lines: list[str] = []
+    current_len = 0
+    hard_limit = int(chunk_chars * 1.5)
+
+    for line in lines:
+        line_len = len(line) + 1  # +1 for the \n that join will add
+        # 当前行加入后是否会超过软上限？
+        would_exceed_soft = current_len + line_len > chunk_chars
+        # 但如果当前块还是空的，无论如何都要先放进至少一行（保证进度，避免死循环）
+        if would_exceed_soft and current_lines:
+            # 已有内容且即将超软上限 → 先切一块
+            chunks.append("\n".join(current_lines))
+            current_lines = []
+            current_len = 0
+        current_lines.append(line)
+        current_len += line_len
+        # 硬上限兜底：单块过大（含超长单行）时强制切
+        if current_len >= hard_limit:
+            chunks.append("\n".join(current_lines))
+            current_lines = []
+            current_len = 0
+
+    if current_lines:
+        chunks.append("\n".join(current_lines))
+    return chunks or [text]
+
+
+
+
 def glossary_prompt(glossary: dict[str, list[str]]) -> str:
     """把热词规范名词表渲染成给纪要 LLM 的提示。
     转写里的产品/系统/项目/人名/公司常被语音识别带偏（同音字、漏字、张冠李戴），
@@ -172,7 +224,9 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any], glossary_hint: s
         raise RuntimeError("LLM_API_KEY is not configured")
 
     chunk_chars = env_int("AHAMVOICE_SUMMARY_CHUNK_CHARS", 18000, 8000, 28000)
-    chunks = [text[i : i + chunk_chars] for i in range(0, len(text), chunk_chars)] or [""]
+    chunks = split_transcript_into_chunks(text, chunk_chars)
+    if not chunks:
+        chunks = [""]
     depth = summary_depth_instruction(rec, text)
     focus = meeting_focus_instruction(rec.get("meeting_type") or "")
     partials: list[str] = []
