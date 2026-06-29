@@ -474,25 +474,36 @@ async def revise_summary_api(recording_id: str, payload: dict[str, str], user: d
     return await revise_summary(recording_id, payload.get("instruction") or "", user)
 
 
+def _resolve_export_format(fmt: str) -> str:
+    """校验导出格式，非法值 400。"""
+    if fmt not in ("md", "docx"):
+        raise HTTPException(status_code=400, detail=f"unsupported export format: {fmt} (支持 md/docx)")
+    return fmt
+
+
+def _export_media_type(fmt: str) -> str:
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if fmt == "docx" else "text/markdown; charset=utf-8"
+
+
 @app.get("/api/recordings/{recording_id}/export/transcript.md")
 def export_transcript(recording_id: str, format: str = "md", user: dict[str, Any] = Depends(current_user)) -> FileResponse:
-    path = write_export(recording_id, "transcript", user, fmt=format)
-    media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if format == "docx" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name)
+    fmt = _resolve_export_format(format)
+    path = write_export(recording_id, "transcript", user, fmt=fmt)
+    return FileResponse(path, media_type=_export_media_type(fmt), filename=path.name)
 
 
 @app.get("/api/recordings/{recording_id}/export/summary.md")
 def export_summary(recording_id: str, format: str = "md", user: dict[str, Any] = Depends(current_user)) -> FileResponse:
-    path = write_export(recording_id, "summary", user, fmt=format)
-    media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if format == "docx" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name)
+    fmt = _resolve_export_format(format)
+    path = write_export(recording_id, "summary", user, fmt=fmt)
+    return FileResponse(path, media_type=_export_media_type(fmt), filename=path.name)
 
 
 @app.get("/api/recordings/{recording_id}/export/summaries/{summary_id}.md")
 def export_summary_version(recording_id: str, summary_id: str, format: str = "md", user: dict[str, Any] = Depends(current_user)) -> FileResponse:
-    path = write_summary_export(recording_id, summary_id, user, fmt=format)
-    media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if format == "docx" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name)
+    fmt = _resolve_export_format(format)
+    path = write_summary_export(recording_id, summary_id, user, fmt=fmt)
+    return FileResponse(path, media_type=_export_media_type(fmt), filename=path.name)
 
 
 @app.post("/api/recordings/{recording_id}/emotion")
