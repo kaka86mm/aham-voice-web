@@ -356,6 +356,107 @@ def process_api(
     return {"recording_id": recording_id, "status": "queued"}
 
 
+@app.post("/api/recordings/process-and-wait")
+def process_and_wait(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    meeting_type: str = Form("内部会议"),
+    tag: str = Form(""),
+    expected_speakers: int | None = Form(None),
+    timeout_seconds: int = Form(600),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    """上传录音 + 同步等待转写+纪要完成，返回结果（供 Dify/脚本调用）。
+
+    与 /api/recordings 的区别：这个端点阻塞直到处理完成（或超时），
+    调用方一次请求拿到结果，不用自己轮询。适合 Dify HTTP 节点等
+    同步场景。超时返回 recording_id，调用方可去 Web 端查看。
+
+    返回：{recording_id, status: done/timeout/failed, summary_id, overview, web_url}
+    """
+    import time as _time
+    # 复用上传逻辑
+    rec_id = str(uuid.uuid4())
+    ext = Path(file.filename or "recording.mp3").suffix or ".mp3"
+    target = RECORDINGS / f"{rec_id}{ext}"
+    chunk_size = 1024 * 1024
+    written = 0
+    try:
+        with target.open("wb") as out:
+            while True:
+                chunk = file.file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > env_int("AHAMVOICE_UPLOAD_MAX_MB", 2048, 16, 16384) * 1024 * 1024:
+                    out.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="upload exceeds limit")
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    if written == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+    duration = probe_duration(target)
+    with db() as conn:
+        conn.execute(
+            """insert into recordings(id,title,filename,file_path,meeting_type,tag,owner_id,team_id,duration,duration_label,asr_status,summary_status,expected_speakers,created_at,updated_at)
+            values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (rec_id, title.strip(), file.filename or target.name, str(target), meeting_type, tag,
+             user["id"], user.get("team_id"), duration, seconds_label(duration),
+             "queued", "pending",
+             (expected_speakers if (expected_speakers and 2 <= expected_speakers <= 50) else None),
+             now(), now()),
+        )
+        conn.commit()
+    # 后台触发转写+纪要
+    background_tasks.add_task(process_recording_background, rec_id, dict(user))
+
+    # 阻塞轮询等完成
+    deadline = _time.time() + min(max(timeout_seconds, 60), 1200)
+    final_status = "timeout"
+    while _time.time() < deadline:
+        _time.sleep(10)
+        with db() as conn:
+            rec = rowdict(conn.execute("select asr_status, summary_status from recordings where id = ?", (rec_id,)).fetchone())
+        if not rec:
+            final_status = "failed"
+            break
+        s = f"{rec['asr_status']}/{rec['summary_status']}"
+        if "failed" in s:
+            final_status = "failed"
+            break
+        if s == "done/done":
+            final_status = "done"
+            break
+
+    # 组装结果
+    result: dict[str, Any] = {
+        "recording_id": rec_id,
+        "status": final_status,
+        "web_url": f"http://100.66.1.22:8800",
+    }
+    if final_status == "done":
+        with db() as conn:
+            summ = rowdict(conn.execute(
+                "select id, content from summaries where recording_id = ? and is_current = 1 order by version desc limit 1",
+                (rec_id,),
+            ).fetchone())
+        if summ:
+            result["summary_id"] = summ["id"]
+            result["docx_url"] = f"/api/recordings/{rec_id}/export/summaries/{summ['id']}.md?format=docx"
+            # 提取一句话概览
+            import re
+            m = re.search(r"##\s*一句话概览\s*\n(.+?)(?=\n##|\Z)", summ["content"] or "", re.S)
+            result["overview"] = (m.group(1).strip()[:300] if m else "纪要已生成")
+    return result
+
+
 @app.get("/api/recordings/{recording_id}")
 def recording_detail(recording_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     with db() as conn:
