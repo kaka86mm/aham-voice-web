@@ -65,7 +65,7 @@ export function RecordingCard({ recording, segments, hotwordPackage, audioRef }:
         <div className="stat-tile">
           <span className="stat-tile__label">热词</span>
           <span className={`stat-tile__value${hotwordsEnabled ? "" : " is-pending"}`}>
-            {hotwordsEnabled ? `已启用 · ${hotwordPackage!.asr_terms_count} 条` : "暂未启用"}
+            {hotwordsEnabled ? `转写用 ${hotwordPackage!.asr_terms_count} 条` : "暂未启用"}
           </span>
         </div>
         <div className="stat-tile">

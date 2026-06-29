@@ -397,9 +397,17 @@ async def summarize_recording(recording_id: str, user: dict[str, Any]) -> dict[s
         text = transcript_text(conn, recording_id)
         if not text.strip():
             raise HTTPException(status_code=409, detail="transcript is empty")
-        # 取转写时持久化的热词包，拿到规范名词表喂给纪要 LLM。
-        package = latest_hotword_package(conn, recording_id)
-        glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
+        # 纪要生成时用【当前最新热词库】重建 glossary，而非转写时的旧快照。
+        # 这样用户在热词库新增/确认词后，重新生成纪要就能用上（glossary 注入 LLM）。
+        from .hotwords import build_hotword_package
+        from .state import _LOCAL_USER
+        try:
+            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=False)
+            glossary_hint = glossary_prompt(fresh_pkg.get("glossary") or {})
+        except Exception:
+            # 重建失败则回退到转写时的快照
+            package = latest_hotword_package(conn, recording_id)
+            glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
         task_id = create_task(conn, recording_id, rec["title"], "云端纪要")
         conn.execute("update recordings set summary_status = ?, updated_at = ? where id = ?", ("running", now(), recording_id))
         version = next_summary_version(conn, recording_id)
@@ -459,9 +467,15 @@ async def revise_summary(recording_id: str, instruction: str, user: dict[str, An
         if not base_summary:
             raise HTTPException(status_code=409, detail="summary is not ready")
         text = transcript_text(conn, recording_id)
-        # 修改纪要时同样取规范名词表，保证改写后专有名词写法一致。
-        package = latest_hotword_package(conn, recording_id)
-        glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
+        # 修改纪要时同样用当前最新热词库重建 glossary（与 summarize_recording 一致）。
+        from .hotwords import build_hotword_package
+        from .state import _LOCAL_USER
+        try:
+            fresh_pkg = build_hotword_package(conn, rec, _LOCAL_USER, persist=False)
+            glossary_hint = glossary_prompt(fresh_pkg.get("glossary") or {})
+        except Exception:
+            package = latest_hotword_package(conn, recording_id)
+            glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
         task_id = create_task(conn, recording_id, rec["title"], "自然语言修改纪要")
         conn.execute("update recordings set summary_status = ?, updated_at = ? where id = ?", ("running", now(), recording_id))
         version = next_summary_version(conn, recording_id)
