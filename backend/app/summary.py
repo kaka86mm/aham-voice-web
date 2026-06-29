@@ -16,6 +16,7 @@ from .db import (
 )
 from .deepseek import _deepseek_post_with_retry
 from .emotion import current_emotion_analysis
+from .hotwords import latest_hotword_package
 
 
 def transcript_text(conn: sqlite3.Connection, recording_id: str) -> str:
@@ -28,6 +29,46 @@ def transcript_text(conn: sqlite3.Connection, recording_id: str) -> str:
         label = row["speaker_name"] or f"Speaker {row['speaker']}"
         lines.append(f"[{row['start_label']}-{seconds_label(row['end_sec'])}] {label}: {row['text']}")
     return "\n".join(lines)
+
+
+
+def glossary_prompt(glossary: dict[str, list[str]]) -> str:
+    """把热词规范名词表渲染成给纪要 LLM 的提示。
+    转写里的产品/系统/项目/人名/公司常被语音识别带偏（同音字、漏字、张冠李戴），
+    这里把已知规范写法按分类列给 LLM，要求统一用规范名。"""
+    if not glossary:
+        return ""
+    # 把分类映射成更自然的中文标签，并按重要性排序。
+    kind_order = ["产品", "系统", "项目", "商机", "客户", "客户简称", "潜在客户", "人员", "行业", "业务术语"]
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    def collect(kind: str) -> str:
+        words: list[str] = []
+        for w in glossary.get(kind, []):
+            if w and w not in seen:
+                seen.add(w)
+                words.append(w)
+        return "、".join(words)
+
+    for kind in kind_order:
+        joined = collect(kind)
+        if joined:
+            lines.append(f"- {kind}：{joined}")
+    # 兜底：捕获未在 kind_order 里出现的分类。
+    for kind in glossary:
+        if kind in kind_order:
+            continue
+        joined = collect(kind)
+        if joined:
+            lines.append(f"- {kind}：{joined}")
+    if not lines:
+        return ""
+    return (
+        "以下是本场会议涉及的专有名词规范写法，纪要中涉及这些对象时必须使用规范名，"
+        "不要采用转写里的同音/近音变形或残缺写法：\n"
+        + "\n".join(lines)
+    )
 
 
 
@@ -125,7 +166,7 @@ def meeting_template(meeting_type: str) -> str:
 
 
 
-async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, str]:
+async def call_deepseek_summary(text: str, rec: dict[str, Any], glossary_hint: str = "") -> tuple[str, str]:
     api_key, base, model = get_llm_config()
     if not api_key:
         raise RuntimeError("LLM_API_KEY is not configured")
@@ -136,6 +177,8 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
     focus = meeting_focus_instruction(rec.get("meeting_type") or "")
     partials: list[str] = []
     chat_url = f"{base}/chat/completions"
+    # map 步骤也需要看到规范名词表，否则分块素材里就先写错了，reduce 阶段再纠正成本高。
+    map_glossary = ("\n\n" + glossary_hint) if glossary_hint else ""
     async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
         for index, chunk in enumerate(chunks, 1):
             payload = {
@@ -149,6 +192,7 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
                             "你是企业内部会议纪要的信息抽取助手。只基于转写文本输出，不编造事实。"
                             "你的任务不是压缩到最短，而是保留后续生成详细纪要所需的事实、对象、数字、观点和证据。"
                             "禁止提炼行动项、待办、下一步、风险或客户需求模块。"
+                            + map_glossary
                         ),
                     },
                     {
@@ -178,6 +222,8 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
             }
             partials.append(await _deepseek_post_with_retry(client, chat_url, api_key, payload))
 
+        # reduce 阶段：用规范名词表替换原来的"文字提醒"，并把空小节改为省略。
+        reduce_glossary = ("\n\n" + glossary_hint) if glossary_hint else ""
         final_payload = {
             "model": model,
             "temperature": 0.2,
@@ -187,11 +233,12 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
                     "role": "system",
                     "content": (
                         "你是企业内部会议纪要助手。输出信息丰富、层次清楚、可追溯的 Markdown 纪要。"
-                        "只基于转写和分块素材，不编造事实；不确定内容必须标注“疑似”或“未明确”。"
+                        "只基于转写和分块素材，不编造事实；不确定内容必须标注“疑似”。"
                         "重要：转写里的公司/项目/人名可能被语音识别带偏或张冠李戴——突兀的长全称"
                         "（尤其含“有限公司/集团”且只出现一两次的）不要当成标准项目名，优先用口语高频的简称；"
                         "同一项目出现多个候选名时取最一致的那个；项目归属（谁负责/哪个客户）拿不准就标“疑似”，绝不硬编。"
                         "禁止输出或提及行动项、待办、下一步、风险、客户需求、CRM 跟进模块。"
+                        + reduce_glossary
                     ),
                 },
                 {
@@ -209,7 +256,8 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
                         "- 对长会议，要按客户/项目/模块/流程分组，合并重复表达，但保留具体名称和关键数字。\n"
                         "- 关键原文证据要分散覆盖主要议题，不要只引用开头几分钟。\n"
                         "- 不要出现“行动项”“待办”“下一步”“跟进事项”等表述。\n\n"
-                        "请严格按以下结构输出（小节标题和顺序保持不变；某节无内容就写“未明确”，不要删节也不要新增顶级小节）：\n"
+                        "请按以下结构输出：有内容的小节正常写；某小节本次会议完全没有涉及的，直接省略该小节（不要只写“未明确”，避免纪要显得空洞）；不要新增结构里没有的顶级小节。\n"
+                        "建议结构如下（可按实际涉及内容省略空小节）：\n"
                         + meeting_template(rec.get("meeting_type") or "") + "\n\n"
                         + "\n\n".join(partials)
                     ),
@@ -220,7 +268,7 @@ async def call_deepseek_summary(text: str, rec: dict[str, Any]) -> tuple[str, st
 
 
 
-async def call_deepseek_revision(instruction: str, base_summary: str, transcript: str, rec: dict[str, Any]) -> tuple[str, str]:
+async def call_deepseek_revision(instruction: str, base_summary: str, transcript: str, rec: dict[str, Any], glossary_hint: str = "") -> tuple[str, str]:
     api_key, base, model = get_llm_config()
     if not api_key:
         raise RuntimeError("LLM_API_KEY is not configured")
@@ -235,6 +283,7 @@ async def call_deepseek_revision(instruction: str, base_summary: str, transcript
         )
     depth = summary_depth_instruction(rec, transcript)
     focus = meeting_focus_instruction(rec.get("meeting_type") or "")
+    revision_glossary = ("\n\n" + glossary_hint) if glossary_hint else ""
     payload = {
         "model": model,
         "temperature": 0.2,
@@ -247,6 +296,7 @@ async def call_deepseek_revision(instruction: str, base_summary: str, transcript
                     "保持信息丰富、结构清楚、可追溯；只基于原纪要和转写文本，不编造事实。"
                     "转写里的公司/项目/人名可能被语音识别带偏——突兀的长全称不要当标准名、优先口语简称，归属拿不准标“疑似”。"
                     "禁止输出或提及行动项、待办、下一步、风险、客户需求、CRM 跟进模块。"
+                    + revision_glossary
                 ),
             },
             {
@@ -289,13 +339,16 @@ async def summarize_recording(recording_id: str, user: dict[str, Any]) -> dict[s
         text = transcript_text(conn, recording_id)
         if not text.strip():
             raise HTTPException(status_code=409, detail="transcript is empty")
+        # 取转写时持久化的热词包，拿到规范名词表喂给纪要 LLM。
+        package = latest_hotword_package(conn, recording_id)
+        glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
         task_id = create_task(conn, recording_id, rec["title"], "云端纪要")
         conn.execute("update recordings set summary_status = ?, updated_at = ? where id = ?", ("running", now(), recording_id))
         version = next_summary_version(conn, recording_id)
         conn.commit()
 
     try:
-        content, model = await call_deepseek_summary(text, rec)
+        content, model = await call_deepseek_summary(text, rec, glossary_hint)
         with db() as conn:
             summary_id = str(uuid.uuid4())
             conn.execute("update summaries set is_current = 0 where recording_id = ?", (recording_id,))
@@ -348,13 +401,16 @@ async def revise_summary(recording_id: str, instruction: str, user: dict[str, An
         if not base_summary:
             raise HTTPException(status_code=409, detail="summary is not ready")
         text = transcript_text(conn, recording_id)
+        # 修改纪要时同样取规范名词表，保证改写后专有名词写法一致。
+        package = latest_hotword_package(conn, recording_id)
+        glossary_hint = glossary_prompt(package.get("glossary") or {}) if package else ""
         task_id = create_task(conn, recording_id, rec["title"], "自然语言修改纪要")
         conn.execute("update recordings set summary_status = ?, updated_at = ? where id = ?", ("running", now(), recording_id))
         version = next_summary_version(conn, recording_id)
         conn.commit()
 
     try:
-        content, model = await call_deepseek_revision(instruction, base_summary["content"], text, rec)
+        content, model = await call_deepseek_revision(instruction, base_summary["content"], text, rec, glossary_hint)
         with db() as conn:
             summary_id = str(uuid.uuid4())
             conn.execute("update summaries set is_current = 0 where recording_id = ?", (recording_id,))

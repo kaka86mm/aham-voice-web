@@ -211,6 +211,18 @@ def build_hotword_package(conn: sqlite3.Connection, rec: dict[str, Any], user: d
     for row in selected_rows:
         source = str(row.get("source") or "未知来源")
         source_counts[source] = source_counts.get(source, 0) + 1
+    # 规范名词表：按 kind 分组，喂给纪要 LLM，统一专有名词写法。
+    # 只保留被选中的热词（asr_terms 命中的），避免把词库全量塞进 prompt。
+    glossary: dict[str, list[str]] = {}
+    seen_words: set[str] = set()
+    for row in selected_rows:
+        word = str(row.get("word") or "").strip()
+        key = word.lower()
+        if not word or key in seen_words:
+            continue
+        seen_words.add(key)
+        kind = str(row.get("kind") or "业务术语").strip()
+        glossary.setdefault(kind, []).append(word)
     package = {
         "asr_terms": selected_terms,
         "correction_terms": correction_terms,
@@ -220,6 +232,7 @@ def build_hotword_package(conn: sqlite3.Connection, rec: dict[str, Any], user: d
         "dynamic_terms_count": sum(1 for row in selected_rows if not int(row.get("protected") or 0)),
         "source_summary": source_counts,
         "replacement_map": replacement_map,
+        "glossary": glossary,
     }
     if persist:
         version = (
@@ -230,8 +243,8 @@ def build_hotword_package(conn: sqlite3.Connection, rec: dict[str, Any], user: d
             """
             insert into recording_hotword_packages(
                 id,recording_id,version,asr_terms_count,correction_terms_count,protected_terms_count,dynamic_terms_count,
-                source_summary,asr_terms,correction_terms,created_at
-            ) values(?,?,?,?,?,?,?,?,?,?,?)
+                source_summary,asr_terms,correction_terms,created_at,glossary
+            ) values(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 str(uuid.uuid4()),
@@ -245,6 +258,7 @@ def build_hotword_package(conn: sqlite3.Connection, rec: dict[str, Any], user: d
                 json.dumps(selected_terms, ensure_ascii=False),
                 json.dumps(correction_terms, ensure_ascii=False),
                 now(),
+                json.dumps(glossary, ensure_ascii=False),
             ),
         )
         selected_ids = [row["id"] for row in selected_rows if row.get("id")]
@@ -275,6 +289,7 @@ def latest_hotword_package(conn: sqlite3.Connection, recording_id: str) -> dict[
     row["source_summary"] = safe_json(row.get("source_summary"), {})
     row["asr_terms"] = safe_json(row.get("asr_terms"), [])
     row["correction_terms"] = safe_json(row.get("correction_terms"), [])
+    row["glossary"] = safe_json(row.get("glossary"), {})
     return row
 
 

@@ -408,6 +408,9 @@ def ensure_schema() -> None:
             conn.execute("update speaker_profiles set scope = case when team_id is null then 'global' else 'team' end")
         if "note" not in profile_cols:
             conn.execute("alter table speaker_profiles add column note text")
+        pkg_cols = {row["name"] for row in conn.execute("pragma table_info(recording_hotword_packages)").fetchall()}
+        if "glossary" not in pkg_cols:
+            conn.execute("alter table recording_hotword_packages add column glossary text not null default '{}'")
         if not conn.execute("select 1 from hotwords limit 1").fetchone():
             seed_hotwords = [
                 ("AhamVoice", "产品", "aham voice,aham", "系统内置", "部门共享", 10, 1),
