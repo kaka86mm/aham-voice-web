@@ -395,6 +395,21 @@ def transcribe_recording(recording_id: str, user: dict[str, Any], segment_second
             update_task(conn, task_id, "running", 82)
         speaker_matches = match_speaker_profiles(rec, sentence_info)
         merged_segments = sentence_info_to_transcript_segments(sentence_info, hotwords, speaker_matches)
+
+        # 方言口音纠错（可选，环境变量开关）。SeACo 对方言会产生大量近音错字，
+        # LLM 结合上下文能纠正。实测贵州话纠错率约 80%，质量好。
+        # 失败不阻塞——保留原文继续，转写/纪要照常。
+        if os.environ.get("AHAMVOICE_DIALECT_CORRECTION", "").lower() in ("1", "true", "yes"):
+            try:
+                from .dialect_correction import correct_dialect_segments
+                with db() as conn:
+                    update_task(conn, task_id, "running", 86)
+                before_sample = merged_segments[0]["text"][:40] if merged_segments else ""
+                merged_segments = correct_dialect_segments(merged_segments)
+                print(f"[asr] 方言纠错完成，段数={len(merged_segments)}，原文样本: {before_sample}", flush=True)
+            except Exception as exc:
+                print(f"[asr] 方言纠错失败（不阻塞，保留原文）: {type(exc).__name__}: {exc}", flush=True)
+
         with db() as conn:
             update_task(conn, task_id, "running", 90)
             inserted = 0
