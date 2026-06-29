@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchRecording, processRecording, generateEmotion } from "@/api/endpoints";
@@ -96,6 +96,20 @@ export function RecordingDetail() {
   const [previewKey, setPreviewKey] = useState<ArtifactKey | null>(null);
   const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [drawerSpeaker, setDrawerSpeaker] = useState<string | undefined>(undefined);
+
+  // 录音播放器 ref：纪要里的时间戳点击后 seek 到这里播放。
+  // 由 RecordingCard 绑定到 <audio>，Preview 通过 onSeekToTime 调用。
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /** 纪要时间戳点击回调：seek 左侧播放器到指定秒数并播放。 */
+  const handleSeekToTime = useCallback((seconds: number) => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = seconds;
+    el.play().catch(() => {
+      // 自动播放被浏览器拦截（用户还没交互过）——静默忽略，用户可手动点播放。
+    });
+  }, []);
 
   const summaries = detail.data?.summaries ?? [];
   const currentSummary = useMemo(
@@ -196,7 +210,7 @@ export function RecordingDetail() {
             </div>
           </div>
 
-          <RecordingCard recording={rec} segments={segments} hotwordPackage={pkg} />
+          <RecordingCard recording={rec} segments={segments} hotwordPackage={pkg} audioRef={audioRef} />
 
           <SpeakersCard
             recordingId={recordingId}
@@ -243,6 +257,7 @@ export function RecordingDetail() {
             selected={previewKey}
             onSelect={setPreviewKey}
             onClose={() => setPreviewKey(null)}
+            onSeekToTime={handleSeekToTime}
           />
         )}
       </aside>

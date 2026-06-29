@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { exportEmotionUrl, exportSummaryVersionUrl, exportTranscriptUrl } from "@/api/endpoints";
 import { Icon } from "@/components/Icon";
 import type { EmotionAnalysis, Summary, TranscriptSegment } from "@/api/types";
+import { rehypeSeekTimestamps } from "@/utils/rehype-seek-timestamps";
 
 export type ArtifactKey = string;
 // "summary:<id>" | "transcript"
@@ -23,6 +24,8 @@ interface Props {
   selected: ArtifactKey;
   onSelect: (key: ArtifactKey) => void;
   onClose: () => void;
+  /** 点击纪要里的时间戳时调用，父组件 seek 左侧录音播放器到该秒数。 */
+  onSeekToTime?: (seconds: number) => void;
 }
 
 // Build the transcript markdown from segments on the client — saves a fetch
@@ -40,7 +43,7 @@ function transcriptMarkdown(segments: TranscriptSegment[]): string {
   return lines.join("\n");
 }
 
-export function Preview({ recordingId, summaries, segments, emotion, selected, onSelect, onClose }: Props) {
+export function Preview({ recordingId, summaries, segments, emotion, selected, onSelect, onClose, onSeekToTime }: Props) {
   const currentSummary = useMemo(() => {
     if (!selected.startsWith("summary:")) return null;
     const id = selected.slice("summary:".length);
@@ -136,9 +139,52 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
 
       <div className="preview-body">
         <article className="preview-doc markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={onSeekToTime ? [rehypeSeekTimestamps] : []}
+            components={
+              onSeekToTime
+                ? {
+                    // 拦截时间戳链接（rehype 生成的 <a class="seek-timestamp">），
+                    // 点击时 seek 播放器而不是跳转。普通 markdown 链接保持原样。
+                    a({ href, children, node, ...rest }) {
+                      const seekSeconds = (node?.properties as { dataSeekSeconds?: string } | undefined)?.dataSeekSeconds;
+                      if (seekSeconds !== undefined) {
+                        const seconds = Number(seekSeconds);
+                        return (
+                          <a
+                            href={href}
+                            className="seek-timestamp"
+                            title={`点击跳到 ${formatSeekLabel(seconds)}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              onSeekToTime(seconds);
+                            }}
+                            {...rest}
+                          >
+                            {children}
+                          </a>
+                        );
+                      }
+                      return <a href={href} {...rest}>{children}</a>;
+                    },
+                  }
+                : undefined
+            }
+          >
+            {markdown}
+          </ReactMarkdown>
         </article>
       </div>
     </div>
   );
+}
+
+/** 把秒数格式化成 mm:ss 或 hh:mm:ss，用于时间戳链接的 title 提示。 */
+function formatSeekLabel(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
