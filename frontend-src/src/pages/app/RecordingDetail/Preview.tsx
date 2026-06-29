@@ -145,26 +145,28 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
             components={
               onSeekToTime
                 ? {
-                    // 拦截时间戳链接（rehype 生成的 <a class="seek-timestamp">），
-                    // 点击时 seek 播放器而不是跳转。普通 markdown 链接保持原样。
-                    a({ href, children, node, ...rest }) {
-                      const seekSeconds = (node?.properties as { dataSeekSeconds?: string } | undefined)?.dataSeekSeconds;
-                      if (seekSeconds !== undefined) {
-                        const seconds = Number(seekSeconds);
-                        return (
-                          <a
-                            href={href}
-                            className="seek-timestamp"
-                            title={`点击跳到 ${formatSeekLabel(seconds)}`}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              onSeekToTime(seconds);
-                            }}
-                            {...rest}
-                          >
-                            {children}
-                          </a>
-                        );
+                    // 拦截时间戳链接（rehype 生成的 <a class="seek-timestamp">，
+                    // href 形如 #t=750），点击时 seek 播放器而非跳转。
+                    // 从 href 解析秒数最可靠（不依赖 hast propertyize 规则）。
+                    a({ href, children, ...rest }) {
+                      if (typeof href === "string" && href.startsWith("#t=")) {
+                        const seconds = Number(href.slice(3));
+                        if (Number.isFinite(seconds)) {
+                          return (
+                            <a
+                              href={href}
+                              className="seek-timestamp"
+                              title={`点击跳到 ${formatSeekLabel(seconds)}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                onSeekToTime(seconds);
+                              }}
+                              {...rest}
+                            >
+                              {children}
+                            </a>
+                          );
+                        }
                       }
                       return <a href={href} {...rest}>{children}</a>;
                     },
