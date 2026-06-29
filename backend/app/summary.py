@@ -520,7 +520,7 @@ def transcript_markdown(conn: sqlite3.Connection, rec: dict[str, Any]) -> str:
 
 
 
-def write_export(recording_id: str, kind: str, user: dict[str, Any]) -> Path:
+def write_export(recording_id: str, kind: str, user: dict[str, Any], fmt: str = "md") -> Path:
     with db() as conn:
         rec = can_access_recording(conn, recording_id, user)
         if kind == "transcript":
@@ -550,13 +550,18 @@ def write_export(recording_id: str, kind: str, user: dict[str, Any]) -> Path:
             suffix = f"情绪分析_v{emotion.get('version') or 1}"
         else:
             raise HTTPException(status_code=404, detail="unknown export")
-    path = EXPORTS / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug(rec['title'])}_{suffix}.md"
-    path.write_text(content, encoding="utf-8")
+    ext = "docx" if fmt == "docx" else "md"
+    path = EXPORTS / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug(rec['title'])}_{suffix}.{ext}"
+    if fmt == "docx":
+        from .docx_export import write_docx
+        write_docx(content, path, title=rec.get("title"))
+    else:
+        path.write_text(content, encoding="utf-8")
     return path
 
 
 
-def write_summary_export(recording_id: str, summary_id: str, user: dict[str, Any]) -> Path:
+def write_summary_export(recording_id: str, summary_id: str, user: dict[str, Any], fmt: str = "md") -> Path:
     with db() as conn:
         rec = can_access_recording(conn, recording_id, user)
         summary = rowdict(
@@ -568,7 +573,12 @@ def write_summary_export(recording_id: str, summary_id: str, user: dict[str, Any
         if not summary:
             raise HTTPException(status_code=404, detail="summary not found")
         suffix = f"纪要_v{summary.get('version') or 1}"
-        path = EXPORTS / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug(rec['title'])}_{suffix}.md"
+    ext = "docx" if fmt == "docx" else "md"
+    path = EXPORTS / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug(rec['title'])}_{suffix}.{ext}"
+    if fmt == "docx":
+        from .docx_export import write_docx
+        write_docx(summary["content"], path, title=rec.get("title"))
+    else:
         path.write_text(summary["content"], encoding="utf-8")
-        return path
+    return path
 

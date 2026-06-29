@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { exportEmotionUrl, exportSummaryVersionUrl, exportTranscriptUrl } from "@/api/endpoints";
@@ -13,6 +13,22 @@ export function summaryArtifactKey(summary: Summary): ArtifactKey {
 }
 export const TRANSCRIPT_KEY: ArtifactKey = "transcript";
 export const EMOTION_KEY: ArtifactKey = "emotion";
+
+// 下载菜单项样式（与组件内联，避免改动 CSS 文件）
+const downloadItemStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  width: "100%",
+  padding: "6px 10px",
+  background: "transparent",
+  border: 0,
+  borderRadius: "var(--radius-xs)",
+  fontSize: "var(--text-xs)",
+  color: "var(--fg-default)",
+  cursor: "pointer",
+  textAlign: "left",
+};
 
 interface Props {
   recordingId: string;
@@ -67,13 +83,13 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
         ? "对话情绪分析"
         : "";
 
-  const downloadHref = currentSummary
-    ? exportSummaryVersionUrl(recordingId, currentSummary.id)
-    : isTranscript
-      ? exportTranscriptUrl(recordingId)
-      : isEmotion
-        ? exportEmotionUrl(recordingId)
-        : null;
+  // 各格式对应的下载 URL（md / docx）。复用同一个导出端点，docx 加 ?format=docx。
+  const buildDownloadHref = (fmt: "md" | "docx"): string | null => {
+    if (currentSummary) return exportSummaryVersionUrl(recordingId, currentSummary.id, fmt);
+    if (isTranscript) return exportTranscriptUrl(recordingId, fmt);
+    if (isEmotion) return exportEmotionUrl(recordingId, fmt);
+    return null;
+  };
 
   const metaText = currentSummary
     ? `${currentSummary.model}${currentSummary.is_current ? " · 当前版本" : ""}`
@@ -83,18 +99,21 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
         ? emotion?.model ?? ""
         : "";
 
-  async function handleDownload() {
-    if (!downloadHref) return;
-    const filename = `${displayName || "导出"}.md`.replace(/[\\/:*?"<>|]/g, "_");
-    // Web browser: native <a download>. (The old pywebview save_file path was
-    // removed — this is a browser app now, WKWebView's download quirk is gone.)
+  function triggerDownload(fmt: "md" | "docx") {
+    const href = buildDownloadHref(fmt);
+    if (!href) return;
+    const ext = fmt === "docx" ? "docx" : "md";
+    const filename = `${displayName || "导出"}.${ext}`.replace(/[\\/:*?"<>|]/g, "_");
+    // Web browser: native <a download>.
     const a = document.createElement("a");
-    a.href = downloadHref;
+    a.href = href;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
   }
+
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   return (
     <div
@@ -126,10 +145,60 @@ export function Preview({ recordingId, summaries, segments, emotion, selected, o
               )}
             </select>
           )}
-          {downloadHref && (
-            <button type="button" onClick={handleDownload} className="icon-btn" aria-label="下载">
-              <Icon name="download" size={14} />
-            </button>
+          {buildDownloadHref("md") && (
+            <div className="download-menu" style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="下载"
+                title="下载"
+                onClick={() => setDownloadOpen((v) => !v)}
+              >
+                <Icon name="download" size={14} />
+              </button>
+              {downloadOpen && (
+                <>
+                  {/* 点击外部关闭菜单 */}
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 10 }}
+                    onClick={() => setDownloadOpen(false)}
+                  />
+                  <div
+                    className="download-menu__panel"
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "100%",
+                      marginTop: 4,
+                      zIndex: 11,
+                      background: "var(--bg-surface)",
+                      border: "1px solid var(--border-default)",
+                      borderRadius: "var(--radius-sm)",
+                      boxShadow: "0 8px 24px -8px oklch(0 0 0 / 0.18)",
+                      padding: "4px",
+                      minWidth: 120,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="download-menu__item"
+                      style={downloadItemStyle}
+                      onClick={() => { triggerDownload("docx"); setDownloadOpen(false); }}
+                    >
+                      <Icon name="file-text" size={13} /> Word (.docx)
+                    </button>
+                    <button
+                      type="button"
+                      className="download-menu__item"
+                      style={downloadItemStyle}
+                      onClick={() => { triggerDownload("md"); setDownloadOpen(false); }}
+                    >
+                      <Icon name="file" size={13} /> Markdown (.md)
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
           <button type="button" className="icon-btn" aria-label="关闭预览" onClick={onClose}>
             <Icon name="x" size={14} />

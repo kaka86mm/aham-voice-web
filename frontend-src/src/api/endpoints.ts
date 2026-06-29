@@ -283,20 +283,20 @@ export function recordingAudioUrl(id: string): string {
   return withToken(`${apiPrefix()}/recordings/${id}/audio`);
 }
 
-export function exportTranscriptUrl(id: string): string {
-  return withToken(`${apiPrefix()}/recordings/${id}/export/transcript.md`);
+export function exportTranscriptUrl(id: string, fmt: "md" | "docx" = "md"): string {
+  return withToken(`${apiPrefix()}/recordings/${id}/export/transcript.md${fmt === "docx" ? "?format=docx" : ""}`);
 }
 
-export function exportSummaryUrl(id: string): string {
-  return withToken(`${apiPrefix()}/recordings/${id}/export/summary.md`);
+export function exportSummaryUrl(id: string, fmt: "md" | "docx" = "md"): string {
+  return withToken(`${apiPrefix()}/recordings/${id}/export/summary.md${fmt === "docx" ? "?format=docx" : ""}`);
 }
 
-export function exportSummaryVersionUrl(id: string, summaryId: string): string {
-  return withToken(`${apiPrefix()}/recordings/${id}/export/summaries/${summaryId}.md`);
+export function exportSummaryVersionUrl(id: string, summaryId: string, fmt: "md" | "docx" = "md"): string {
+  return withToken(`${apiPrefix()}/recordings/${id}/export/summaries/${summaryId}.md${fmt === "docx" ? "?format=docx" : ""}`);
 }
 
-export function exportEmotionUrl(id: string): string {
-  return withToken(`${apiPrefix()}/recordings/${id}/export/emotion.md`);
+export function exportEmotionUrl(id: string, fmt: "md" | "docx" = "md"): string {
+  return withToken(`${apiPrefix()}/recordings/${id}/export/emotion.md${fmt === "docx" ? "?format=docx" : ""}`);
 }
 
 export function segmentAudioUrl(recordingId: string, segmentId: string): string {
