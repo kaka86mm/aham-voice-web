@@ -849,14 +849,32 @@ def hotword_candidates(
 
 @app.post("/api/hotwords/candidates/confirm")
 def confirm_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    """批量确认候选词：state candidate→active。edits 可纠正写法/分类。"""
+    """批量确认候选词：state candidate→active。edits 可纠正写法/分类。
+
+    重复词检查：如果确认后的 word 已存在于 active/protected，跳过（防重复）。
+    """
+    if not isinstance(payload.get("ids"), list):
+        raise HTTPException(status_code=400, detail="ids 必须是数组")
     ids = payload.get("ids") or []
     edits = payload.get("edits") or {}
     ts = now()
     confirmed = 0
+    skipped_duplicate = 0
     with db() as conn:
         for hid in ids:
             e = edits.get(hid, {})
+            final_word = (e.get("word") or "").strip().lower()
+            if not final_word:
+                # 没编辑，取数据库里现有的 word 查重
+                row = conn.execute("select word from hotwords where id = ?", (hid,)).fetchone()
+                final_word = (row[0].lower() if row else "")
+            # 查重：word 已在 active/protected（排除自己）
+            if final_word and conn.execute(
+                "select 1 from hotwords where lower(word) = ? and state in ('active','protected') and id != ?",
+                (final_word, hid),
+            ).fetchone():
+                skipped_duplicate += 1
+                continue
             assignments = "state = 'active', active = 1, updated_at = ?"
             params: list[Any] = [ts]
             if e.get("word"):
@@ -868,8 +886,8 @@ def confirm_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(c
             params.append(hid)
             cursor = conn.execute(f"update hotwords set {assignments} where id = ? and state = 'candidate'", params)
             confirmed += cursor.rowcount
-        audit(conn, user, "hotword.confirm", f"确认 {confirmed} 个候选热词。")
-    return {"confirmed": confirmed}
+        audit(conn, user, "hotword.confirm", f"确认 {confirmed} 个候选热词（跳过 {skipped_duplicate} 个重复）。")
+    return {"confirmed": confirmed, "skipped_duplicate": skipped_duplicate}
 
 
 @app.patch("/api/hotwords/candidates/{candidate_id}")
@@ -881,18 +899,23 @@ def edit_candidate(
     """只编辑候选词的写法/分类，不改变 state（不确认进库）。
 
     编辑保存 ≠ 确认。用户可能想先纠正写法，回头再批量确认。
+    重复词检查：如果改后的 word 已存在于 active/protected，拒绝（409）。
     """
     word = (payload.get("word") or "").strip()
     kind = (payload.get("kind") or "").strip()
     if not word:
         raise HTTPException(status_code=400, detail="word 不能为空")
-    assignments = "word = ?, updated_at = ?"
-    params: list[Any] = [word, now()]
-    if kind:
-        assignments = "word = ?, kind = ?, updated_at = ?"
-        params = [word, kind, now()]
-    params.append(candidate_id)
     with db() as conn:
+        # 查重：word 已在 active/protected
+        if conn.execute(
+            "select 1 from hotwords where lower(word) = ? and state in ('active','protected') and id != ?",
+            (word.lower(), candidate_id),
+        ).fetchone():
+            raise HTTPException(status_code=409, detail=f"热词「{word}」已存在")
+        # kind 空字符串允许清除（传 NULL），不再静默忽略
+        assignments = "word = ?, kind = ?, updated_at = ?"
+        params: list[Any] = [word, kind if kind else None, now()]
+        params.append(candidate_id)
         cursor = conn.execute(
             f"update hotwords set {assignments} where id = ? and state = 'candidate'",
             params,

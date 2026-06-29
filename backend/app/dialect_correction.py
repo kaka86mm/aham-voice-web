@@ -102,11 +102,23 @@ def correct_dialect_segments(
             corrected_text = _call_llm_correction(api_key, base, model, window_text)
             corrected_lines = _parse_corrected_lines(corrected_text, len(window))
 
+            # 行数对齐检查：LLM 合并/拆分行会导致按位置回填错位（内容串段、
+            # 重复、说话人错配）。行数不匹配时拒绝整个窗口，保留原文——
+            # 错位比不纠错更糟糕。
+            if len(corrected_lines) != len(window):
+                logger.warning(
+                    "dialect correction window %d-%d: line count mismatch "
+                    "(expected %d, got %d), keeping original",
+                    window_start, window_start + len(window),
+                    len(window), len(corrected_lines),
+                )
+                consecutive_failures += 1
+                continue
+
             # 按行对齐回填
             for i, seg in enumerate(window):
                 idx = window_start + i
-                if i < len(corrected_lines):
-                    corrected_segments[idx]["text"] = corrected_lines[i]
+                corrected_segments[idx]["text"] = corrected_lines[i]
             consecutive_failures = 0  # 成功，重置失败计数
         except Exception as exc:
             consecutive_failures += 1
@@ -160,8 +172,9 @@ def _call_llm_correction(
 def _parse_corrected_lines(corrected_text: str, expected_count: int) -> list[str]:
     """把 LLM 纠错输出解析回逐行文本（去掉 [说话人X] 前缀）。
 
-    LLM 应该逐行对应输入，但可能格式有偏差（多空行、漏前缀等），
-    这里做容错：取所有非空行，剥掉前缀。
+    返回实际解析到的行数（不截断）。调用方 correct_dialect_segments 会检查
+    len(result) == expected_count，不匹配则拒绝整个窗口——因为按位置回填
+    错位比保留原文更糟。
     """
     import re
 
@@ -172,5 +185,4 @@ def _parse_corrected_lines(corrected_text: str, expected_count: int) -> list[str
         text = prefix_re.sub("", ln).strip()
         if text:
             result.append(text)
-    # 如果行数对不上（LLM 合并/拆分了），截断到预期数量，不足的用原文兜底
-    return result[:expected_count]
+    return result

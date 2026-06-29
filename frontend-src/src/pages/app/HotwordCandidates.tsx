@@ -22,6 +22,7 @@ export function HotwordCandidates() {
     onSuccess: () => {
       setSelected(new Set());
       setEditingId(null);
+      setError(null);  // 成功后清除错误
       qc.invalidateQueries({ queryKey: ["candidates"] });
     },
     onError: (e) => setError(readApiError(e)),
@@ -31,6 +32,7 @@ export function HotwordCandidates() {
     mutationFn: () => discardCandidates([...selected]),
     onSuccess: () => {
       setSelected(new Set());
+      setError(null);
       qc.invalidateQueries({ queryKey: ["candidates"] });
     },
     onError: (e) => setError(readApiError(e)),
@@ -42,6 +44,7 @@ export function HotwordCandidates() {
     onSuccess: () => {
       // 编辑保存只更新内容，不改变选中状态、不确认进库
       setEditingId(null);
+      setError(null);
       qc.invalidateQueries({ queryKey: ["candidates"] });
     },
     onError: (e) => setError(readApiError(e)),
@@ -70,7 +73,9 @@ export function HotwordCandidates() {
   }
 
   const items = candidates.data ?? [];
-  const allSelected = items.length > 0 && selected.size === items.length;
+  // allSelected 用 every 检查，而非 selected.size === items.length。
+  // 后者在 selected 含已删除的 stale id 时会误判（size 对不上但可见项全选了）。
+  const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
 
   return (
     <div>

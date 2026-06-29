@@ -40,11 +40,17 @@ def test_parse_handles_empty_lines():
     assert result == ["你好", "再见"]
 
 
-def test_parse_truncates_to_expected():
-    """行数超出 expected 时截断（LLM 多输出了）。"""
+def test_parse_no_longer_truncates():
+    """_parse_corrected_lines 不再截断——返回实际行数，由调用方判断对齐。
+
+    之前会截断到 expected_count，但那会掩盖 LLM 合并/拆分行的问题，
+    导致回填错位。现在返回真实行数，correct_dialect_segments 检测到
+    行数不匹配会拒绝整个窗口。
+    """
     text = "[说话人1] a\n[说话人1] b\n[说话人1] c"
-    result = _parse_corrected_lines(text, 2)
-    assert len(result) == 2
+    result = _parse_corrected_lines(text, 2)  # 期望 2，实际 3
+    assert len(result) == 3  # 不截断，返回实际 3 行
+    assert result == ["a", "b", "c"]
 
 
 def test_parse_missing_prefix_still_works():
@@ -72,7 +78,7 @@ def test_no_api_key_returns_original():
 def test_successful_correction_backfills():
     """LLM 纠错成功时，纠正后文本回填到段，保留 speaker。"""
     segs = _make_segments(["合动上评估", "曲俗时间"])
-    # mock LLM 返回纠正后的文本（逐行对应）
+    # mock LLM 返回纠正后的文本（逐行对应，行数匹配）
     corrected_output = "[说话人0] 合同上评估\n[说话人1] 取数时间"
     with patch("backend.app.dialect_correction.get_llm_config", return_value=("key", "base", "model")), \
          patch("backend.app.dialect_correction._call_llm_correction", return_value=corrected_output):
@@ -82,6 +88,19 @@ def test_successful_correction_backfills():
     # speaker 和其他元数据保留
     assert result[0]["speaker"] == "0"
     assert result[0]["start_sec"] == 0
+
+
+def test_line_count_mismatch_rejects_window():
+    """LLM 合并/拆分行导致行数不匹配时，拒绝整个窗口保留原文（防错位）。"""
+    segs = _make_segments(["第一段", "第二段"])
+    # mock LLM 把 2 行合并成 1 行
+    merged_output = "[说话人0] 第一段然后第二段"
+    with patch("backend.app.dialect_correction.get_llm_config", return_value=("key", "base", "model")), \
+         patch("backend.app.dialect_correction._call_llm_correction", return_value=merged_output):
+        result = correct_dialect_segments(segs)
+    # 行数不匹配（期望2，实际1）→ 拒绝，保留原文
+    assert result[0]["text"] == "第一段"
+    assert result[1]["text"] == "第二段"
 
 
 def test_llm_failure_preserves_original():
