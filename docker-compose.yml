@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile.cpu
     ports:
-      - "8765:8765"
+      - "${AHAMVOICE_PORT:-8765}:${AHAMVOICE_PORT:-8765}"
     volumes:
       - ./models:/models      # 4GB 模型，首次启动自动下载
       - ./data:/data          # SQLite + 录音（用户数据，持久化）
