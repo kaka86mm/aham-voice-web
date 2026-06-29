@@ -872,6 +872,37 @@ def confirm_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(c
     return {"confirmed": confirmed}
 
 
+@app.patch("/api/hotwords/candidates/{candidate_id}")
+def edit_candidate(
+    candidate_id: str,
+    payload: dict[str, Any],
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    """只编辑候选词的写法/分类，不改变 state（不确认进库）。
+
+    编辑保存 ≠ 确认。用户可能想先纠正写法，回头再批量确认。
+    """
+    word = (payload.get("word") or "").strip()
+    kind = (payload.get("kind") or "").strip()
+    if not word:
+        raise HTTPException(status_code=400, detail="word 不能为空")
+    assignments = "word = ?, updated_at = ?"
+    params: list[Any] = [word, now()]
+    if kind:
+        assignments = "word = ?, kind = ?, updated_at = ?"
+        params = [word, kind, now()]
+    params.append(candidate_id)
+    with db() as conn:
+        cursor = conn.execute(
+            f"update hotwords set {assignments} where id = ? and state = 'candidate'",
+            params,
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="候选词不存在或已处理")
+        audit(conn, user, "hotword.edit", f"编辑候选词：{word}。")
+    return {"id": candidate_id, "word": word, "kind": kind}
+
+
 @app.post("/api/hotwords/candidates/discard")
 def discard_candidates(payload: dict[str, Any], user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     """批量丢弃候选词：state candidate→discarded。"""

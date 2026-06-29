@@ -318,6 +318,15 @@ export async function confirmCandidates(
   return data;
 }
 
+export async function editCandidate(
+  candidateId: string,
+  word: string,
+  kind: string,
+): Promise<{ id: string; word: string; kind: string }> {
+  const { data } = await api.patch(`/hotwords/candidates/${candidateId}`, { word, kind });
+  return data;
+}
+
 export async function discardCandidates(ids: string[]): Promise<{ discarded: number }> {
   const { data } = await api.post("/hotwords/candidates/discard", { ids });
   return data;

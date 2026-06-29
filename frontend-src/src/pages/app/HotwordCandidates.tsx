@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { confirmCandidates, discardCandidates, fetchCandidates } from "@/api/endpoints";
+import { confirmCandidates, discardCandidates, editCandidate, fetchCandidates } from "@/api/endpoints";
 import { Button } from "@/components/Button";
 import { Diag } from "@/components/Diag";
 import { EmptyState } from "@/components/EmptyState";
@@ -36,6 +36,17 @@ export function HotwordCandidates() {
     onError: (e) => setError(readApiError(e)),
   });
 
+  const editMut = useMutation({
+    mutationFn: (params: { id: string; word: string; kind: string }) =>
+      editCandidate(params.id, params.word, params.kind),
+    onSuccess: () => {
+      // 编辑保存只更新内容，不改变选中状态、不确认进库
+      setEditingId(null);
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+    },
+    onError: (e) => setError(readApiError(e)),
+  });
+
   function toggle(id: string) {
     setSelected((prev) => {
       const n = new Set(prev);
@@ -53,11 +64,9 @@ export function HotwordCandidates() {
 
   function confirmWithEdit() {
     if (!editingId) return;
-    const edits: Record<string, { word?: string; kind?: string }> = {};
-    if (editWord) edits[editingId] = { ...(edits[editingId] || {}), word: editWord };
-    if (editKind) edits[editingId] = { ...(edits[editingId] || {}), kind: editKind };
-    // 只确认正在编辑的这一个词（不自动合并已勾选的，防误触批量确认）
-    confirm.mutate({ ids: [editingId], edits: Object.keys(edits).length > 0 ? edits : undefined });
+    // 编辑保存：只更新写法/分类，不确认进库、不清空选中。
+    // 用户改完写法后，可以用顶部的"确认选中"批量确认（含这个已编辑的词）。
+    editMut.mutate({ id: editingId, word: editWord.trim(), kind: editKind.trim() });
   }
 
   const items = candidates.data ?? [];
@@ -92,7 +101,7 @@ export function HotwordCandidates() {
                 <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
                   <input className="field" value={editWord} onChange={(e) => setEditWord(e.target.value)} style={{ width: 140 }} />
                   <input className="field" value={editKind} onChange={(e) => setEditKind(e.target.value)} style={{ width: 100 }} />
-                  <Button size="sm" variant="primary" onClick={confirmWithEdit}>保存</Button>
+                  <Button size="sm" variant="primary" loading={editMut.isPending} onClick={confirmWithEdit}>保存</Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>取消</Button>
                 </div>
               ) : (
